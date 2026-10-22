@@ -51,6 +51,12 @@
         "default": 500,
         "hint": "每日签到获得的最多灵石数量。"
       },
+      "DAILY_PILL_LIMIT": {
+        "description": "每日服用丹药上限",
+        "type": "int",
+        "default": 20,
+        "hint": "每位玩家每日可服用（使用）丹药的总次数上限，用于防止丹药无限刷属性。设为 0 表示不限制。"
+      },
       "BREAKTHROUGH_DEATH_PROBABILITY": {
         "description": "突破失败死亡概率范围",
         "type": "list",
@@ -276,7 +282,7 @@
       "DATABASE_FILE": {
         "description": "数据库文件名",
         "type": "string",
-        "default": "xiuxian_data_lite.db",
+        "default": "xiuxian_data_v2.db",
         "hint": "存储玩家数据的SQLite数据库文件名，数据库将存储在 data/plugin_data/{插件名}/ 目录下。"
       }
     }

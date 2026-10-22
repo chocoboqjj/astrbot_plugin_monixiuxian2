@@ -8,12 +8,37 @@ import random
 import time
 from typing import Tuple, List, Optional, Dict
 from ..data.data_manager import DataBase
-from ..models_extended import Sect, UserStatus
+from ..models_extended import Sect
+
 from ..models import Player
 
 SECT_NAME_MIN_LENGTH = 2
 SECT_NAME_MAX_LENGTH = 12
 SECT_NAME_FORBIDDEN = ["管理员", "系统", "官方", "GM", "admin"]
+
+# 宗门丹房建设配置
+# 每一级丹房需要消耗的资材与灵石，等级越高每日可领丹药越好
+SECT_ELIXIR_ROOMS = {
+    0: {"name": "无丹房", "materials": 0, "stone": 0, "pills": [], "desc": "尚未建造丹房"},
+    1: {"name": "一阶丹房", "materials": 200, "stone": 5000, "pills": ["聚气丹"], "desc": "可每日领取 1 颗聚气丹"},
+    2: {"name": "二阶丹房", "materials": 500, "stone": 15000, "pills": ["聚气丹", "回元丹"], "desc": "可每日领取聚气丹 + 回元丹"},
+    3: {"name": "三阶丹房", "materials": 1200, "stone": 40000, "pills": ["聚气丹", "回元丹", "凝神丹"], "desc": "可每日领取聚气丹 + 回元丹 + 凝神丹"},
+    4: {"name": "四阶丹房", "materials": 3000, "stone": 100000, "pills": ["聚气丹", "回元丹", "凝神丹", "破障丹"], "desc": "可每日领取聚气丹 + 回元丹 + 凝神丹 + 破障丹"},
+    5: {"name": "五阶丹房", "materials": 8000, "stone": 250000, "pills": ["聚气丹", "回元丹", "凝神丹", "破障丹", "洗髓丹"], "desc": "丹房大成，弟子可领五味宗门丹药"},
+}
+MAX_ELIXIR_ROOM_LEVEL = 5
+
+# 宗门任务每日次数上限（配合每日 0 点重置 sect_task 字段）
+SECT_TASK_DAILY_LIMIT = 3
+
+# 宗门丹药效果（与丹药系统一致，用于展示说明）
+SECT_ELIXIR_EFFECTS = {
+    "聚气丹": "闭关修炼速度 +10%",
+    "回元丹": "气血与灵气上限 +5%",
+    "凝神丹": "会心率 +3%",
+    "破障丹": "突破成功率 +5%",
+    "洗髓丹": "全部属性 +2%",
+}
 
 
 class SectManager:
@@ -483,59 +508,236 @@ class SectManager:
         if not player or player.sect_id == 0:
             return False, "❌ 你还未加入宗门！"
             
-        # 检查CD (使用宗门任务CD类型，假设为4)
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd:
-            await self.db.ext.create_user_cd(user_id)
-            user_cd = await self.db.ext.get_user_cd(user_id)
-            
         current_time = int(time.time())
-        # 假设 CD 记录在 type=4, scheduled_time 为下次可用时间
-        # 这里重用 set_user_busy 逻辑，但任务通常是瞬时的，只设冷却
-        if user_cd.type == UserStatus.SECT_TASK and current_time < user_cd.scheduled_time:
-            remaining = user_cd.scheduled_time - current_time
-            return False, f"❌ 宗门任务冷却中！还需 {remaining//60} 分钟。"
+
+        # 冷却检查：宗门任务是瞬时操作，用独立冷却存储，
+        # 不占用 user_cd 忙碌状态（否则玩家会被锁住 1 小时，无法进行其他操作）
+        cd_key = f"sect_task_cd_{user_id}"
+        cd_value = await self.db.ext.get_system_config(cd_key)
+        if cd_value:
+            try:
+                next_time = int(cd_value)
+                if current_time < next_time:
+                    remaining = next_time - current_time
+                    return False, f"❌ 宗门任务冷却中！还需 {remaining//60} 分钟。"
+            except (TypeError, ValueError):
+                pass
+
+        # 每日次数上限（用 sect_task 字段记录，配合每日定时重置）
+        if player.sect_task >= SECT_TASK_DAILY_LIMIT:
+            return False, (
+                f"❌ 今日宗门任务次数已用尽（{SECT_TASK_DAILY_LIMIT} 次）！\n"
+                f"💡 明日 0 点重置"
+            )
 
         # 执行任务
         contribution_gain = random.randint(10, 30)
         stone_gain = contribution_gain * 10
         
         player.sect_contribution += contribution_gain
+        player.sect_task += 1
         await self.db.update_player(player)
         
-        # 宗门增加资源
-        await self.db.ext.donate_to_sect(player.sect_id, 0) # 只更新建设度? donate_to_sect update both.
-        # 手动更新宗门资源
+        # 宗门增加资源（任务产出的资材直接入账）
         sect = await self.db.ext.get_sect_by_id(player.sect_id)
         if sect:
             sect.sect_materials += stone_gain
             await self.db.ext.update_sect(sect)
 
-        # 设置1小时冷却
-        await self.db.ext.set_user_busy(user_id, 4, current_time + 3600)
+        # 设置独立冷却（1小时），不动忙碌状态
+        await self.db.ext.set_system_config(cd_key, str(current_time + 3600))
         
-        return True, f"✨ 完成宗门任务！\n获得贡献：{contribution_gain}\n宗门资材：+{stone_gain}"
+        return True, (
+            f"✨ 完成宗门任务！\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"获得贡献：+{contribution_gain}\n"
+            f"宗门资材：+{stone_gain}\n"
+            f"今日剩余次数：{SECT_TASK_DAILY_LIMIT - player.sect_task}/{SECT_TASK_DAILY_LIMIT}\n"
+            f"💡 资材可用于「宗门建设」升级丹房"
+        )
+
+    # ===== 宗门建设（丹房）=====
+
+    async def upgrade_elixir_room(self, user_id: str) -> Tuple[bool, str]:
+        """宗主消耗宗门资材 + 灵石升级丹房等级
+
+        宗门资材（sect_materials）此前只增不消费，丹房等级恒为 0，
+        此处为其补上真实消费途径，让「宗门建设」成为可玩的升级系统。
+        """
+        player = await self.db.get_player_by_id(user_id)
+        if not player:
+            return False, "❌ 你还未踏入修仙之路！"
+        if player.sect_id == 0:
+            return False, "❌ 你还未加入宗门！"
+
+        sect = await self.db.ext.get_sect_by_id(player.sect_id)
+        if not sect:
+            return False, "❌ 宗门信息异常！"
+
+        # 建设权限：宗主或长老
+        if player.sect_position not in (0, 1):
+            return False, "❌ 只有宗主或长老可以主持宗门建设！"
+
+        current_level = sect.elixir_room_level
+        if current_level >= MAX_ELIXIR_ROOM_LEVEL:
+            return False, f"❌ {SECT_ELIXIR_ROOMS[current_level]['name']}已是最高等级！"
+
+        target = SECT_ELIXIR_ROOMS[current_level + 1]
+        need_materials = target["materials"]
+        need_stone = target["stone"]
+
+        if sect.sect_materials < need_materials:
+            return False, (
+                f"❌ 宗门资材不足！\n"
+                f"需要：{need_materials} 资材\n"
+                f"当前：{sect.sect_materials} 资材\n"
+                f"💡 完成宗门任务可获得资材"
+            )
+        if player.gold < need_stone:
+            return False, (
+                f"❌ 灵石不足！\n"
+                f"需要：{need_stone:,} 灵石\n"
+                f"当前：{player.gold:,} 灵石"
+            )
+
+        # 扣资材（宗门公共资源）+ 扣灵石（建设者个人承担）
+        sect.sect_materials -= need_materials
+        sect.elixir_room_level = current_level + 1
+        await self.db.ext.update_sect(sect)
+
+        player.gold -= need_stone
+        await self.db.update_player(player)
+
+        new_pills = target["pills"]
+        return True, (
+            f"🎉 丹房升级成功！\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"{target['name']} 已建成\n"
+            f"消耗：{need_materials} 资材 + {need_stone:,} 灵石\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"宗门弟子每日可领取：{'、'.join(new_pills)}\n"
+            f"💡 使用 /宗门丹药 领取"
+        )
+
+    async def get_elixir_room_status(self, user_id: str) -> Tuple[bool, str]:
+        """查看宗门丹房建设状态与效果说明"""
+        player = await self.db.get_player_by_id(user_id)
+        if not player:
+            return False, "❌ 你还未踏入修仙之路！"
+        if player.sect_id == 0:
+            return False, "❌ 你还未加入宗门！"
+
+        sect = await self.db.ext.get_sect_by_id(player.sect_id)
+        if not sect:
+            return False, "❌ 宗门信息异常！"
+
+        level = sect.elixir_room_level
+        current = SECT_ELIXIR_ROOMS[level]
+        lines = [
+            f"🏛️ 宗门丹房 · {sect.sect_name}",
+            "━━━━━━━━━━━━━━━",
+            f"当前等级：{current['name']}（Lv.{level}）",
+            f"宗门资材：{sect.sect_materials}",
+        ]
+
+        if level == 0:
+            lines.append("\n尚未建造丹房，宗门弟子暂无可领丹药。")
+        else:
+            lines.append("\n每日可领丹药：")
+            for pill in current["pills"]:
+                lines.append(f"  · {pill} —— {SECT_ELIXIR_EFFECTS.get(pill, '')}")
+
+        if level < MAX_ELIXIR_ROOM_LEVEL:
+            nxt = SECT_ELIXIR_ROOMS[level + 1]
+            lines.append("\n━━━━━━━━━━━━━━━")
+            lines.append(f"下一级：{nxt['name']}")
+            lines.append(f"  需要：{nxt['materials']} 资材 + {nxt['stone']:,} 灵石")
+            lines.append(f"  效果：{nxt['desc']}")
+            lines.append("💡 宗主/长老可使用「宗门建设」升级")
+
+        return True, "\n".join(lines)
+
+    async def claim_sect_elixir(self, user_id: str) -> Tuple[bool, str]:
+        """领取宗门每日丹药"""
+        player = await self.db.get_player_by_id(user_id)
+        if not player:
+            return False, "❌ 你还未踏入修仙之路！"
+        if player.sect_id == 0:
+            return False, "❌ 你还未加入宗门！"
+
+        sect = await self.db.ext.get_sect_by_id(player.sect_id)
+        if not sect:
+            return False, "❌ 宗门信息异常！"
+
+        level = sect.elixir_room_level
+        if level == 0:
+            return False, "❌ 宗门尚未建造丹房，无丹药可领。\n💡 宗主可使用「宗门建设」升级丹房"
+
+        # 每日只能领一次
+        if player.sect_elixir_get == 1:
+            return False, "❌ 你今日已领取过宗门丹药了，明日再来。"
+
+        pills = SECT_ELIXIR_ROOMS[level]["pills"]
+        inventory = player.get_pills_inventory()
+        gained = []
+        for pill in pills:
+            inventory[pill] = inventory.get(pill, 0) + 1
+            gained.append(pill)
+        player.set_pills_inventory(inventory)
+
+        player.sect_elixir_get = 1
+        await self.db.update_player(player)
+
+        effect_lines = "\n".join(
+            f"  · {p} —— {SECT_ELIXIR_EFFECTS.get(p, '')}" for p in gained
+        )
+        return True, (
+            f"🎁 领取宗门丹药成功！\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"{effect_lines}\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"💡 使用「服用丹药 <名称>」生效"
+        )
 
     async def handle_owner_death(self, sect_id: int, dead_owner_id: str) -> Tuple[bool, str]:
-        """处理宗主死亡，自动传位或解散宗门"""
+        """处理玩家因死亡/重修离开宗门时的宗门善后
+
+        - 若该玩家**不是**宗主：仅脱离宗门（sect_id 归零，职位回退外门）
+        - 若该玩家**是**宗主：
+            - 有其他成员 → 按「职位优先、贡献次之」自动传位
+            - 无其他成员 → 解散宗门
+        """
+        sect = await self.db.ext.get_sect_by_id(sect_id)
+        if not sect:
+            # 宗门已不存在，仅确保玩家自身关系干净
+            await self.db.ext.update_player_sect_info(dead_owner_id, 0, 4)
+            return True, "宗门已不存在，你已自动脱离。"
+
         members = await self.db.ext.get_sect_members(sect_id)
-        # 过滤掉死亡的宗主
+        # 过滤掉已死/离开的玩家
         remaining = [m for m in members if m.user_id != dead_owner_id]
-        
+
+        # 情形一：玩家并非宗主，只是普通成员
+        if sect.sect_owner != dead_owner_id:
+            await self.db.ext.update_player_sect_info(dead_owner_id, 0, 4)
+            return True, "你已脱离宗门。"
+
+        # 情形二：玩家是宗主
         if not remaining:
-            # 无其他成员，解散宗门
+            # 无其他成员，解散宗门（成员列表此时只含死者，无需额外释放）
             await self.db.ext.delete_sect(sect_id)
             return True, "宗门已解散"
-        
+
         # 按职位和贡献排序，选择新宗主
         remaining.sort(key=lambda m: (m.sect_position, -m.sect_contribution))
         new_owner = remaining[0]
-        
+
         # 更新宗门宗主
-        sect = await self.db.ext.get_sect_by_id(sect_id)
-        if sect:
-            sect.sect_owner = new_owner.user_id
-            await self.db.ext.update_sect(sect)
-            await self.db.ext.update_player_sect_info(new_owner.user_id, sect_id, 0)
-        
+        sect.sect_owner = new_owner.user_id
+        await self.db.ext.update_sect(sect)
+        await self.db.ext.update_player_sect_info(new_owner.user_id, sect_id, 0)
+
+        # 原宗主的残留关系（此时玩家即将被级联删除，这里兜底清理）
+        await self.db.ext.update_player_sect_info(dead_owner_id, 0, 4)
+
         return True, f"宗主之位已传给{new_owner.user_name or new_owner.user_id}"

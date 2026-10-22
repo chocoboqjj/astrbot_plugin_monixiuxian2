@@ -3,6 +3,7 @@
 import time
 from decimal import Decimal, ROUND_DOWN
 from typing import Tuple, List, Optional
+from astrbot.api import logger
 from ..data import DataBase
 from ..models import Player
 
@@ -342,8 +343,16 @@ class BankManager:
             
             player_name = player.user_name or f"道友{player.user_id[:6]}"
             
-            # 删除玩家数据（银行追杀致死）- 级联删除所有关联数据
-            await self.db.delete_player_cascade(player.user_id)
+            # 统一惩罚入口（处理宗门善后 + 级联删除所有关联数据）
+            penalty_mgr = getattr(self.db, "penalty_mgr", None)
+            if penalty_mgr is not None:
+                from ..core.penalty_manager import PenaltyReason
+                ok, note = await penalty_mgr.punish(player, PenaltyReason.BANK_KILL)
+                if not ok:
+                    logger.error(f"[BankManager] 统一惩罚失败，兜底级联删除: {note}")
+                    await self.db.delete_player_cascade(player.user_id)
+            else:
+                await self.db.delete_player_cascade(player.user_id)
             
             # 标记贷款逾期
             await self.db.ext.mark_loan_overdue(loan["id"])

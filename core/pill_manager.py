@@ -12,9 +12,26 @@ from ..config_manager import ConfigManager
 class PillManager:
     """丹药管理器 - 处理丹药效果、属性加成和限制机制"""
 
-    def __init__(self, db: DataBase, config_manager: ConfigManager):
+    def __init__(self, db: DataBase, config_manager: ConfigManager, plugin_config=None):
         self.db = db
         self.config_manager = config_manager
+        self.plugin_config = plugin_config
+
+    def _get_daily_pill_limit(self) -> int:
+        """读取每日服用丹药上限配置（0 表示不限制）。"""
+        if not self.plugin_config:
+            return 20
+        try:
+            values = self.plugin_config["VALUES"]
+        except Exception:
+            try:
+                values = self.plugin_config.get("VALUES", {})
+            except Exception:
+                values = {}
+        try:
+            return int(values.get("DAILY_PILL_LIMIT", 20))
+        except Exception:
+            return 20
 
     def _ensure_non_negative_attributes(self, player: Player):
         """保证属性不为负，并同步能量上限约束"""
@@ -131,9 +148,24 @@ class PillManager:
             )
 
         # 根据丹药类型处理
+        # 每日丹药使用上限（防止丹药无限刷属性，daily_pill_usage 此前从未被使用）
+        today = time.strftime("%Y-%m-%d")
+        if player.last_daily_reset != today:
+            player.set_daily_pill_usage({})
+            player.last_daily_reset = today
+        daily_usage = player.get_daily_pill_usage()
+        daily_limit = self._get_daily_pill_limit()
+        if daily_limit and sum(daily_usage.values()) >= daily_limit:
+            return False, (
+                f"今日服用丹药已达上限（{daily_limit} 次）！\n"
+                f"当前已用：{sum(daily_usage.values())} 次\n"
+                f"💡 明日 0 点自动重置，请合理规划丹药使用。"
+            )
+        daily_usage[pill_name] = daily_usage.get(pill_name, 0) + 1
+        player.set_daily_pill_usage(daily_usage)
+
         effect_type = pill_data.get("effect_type", "instant")
         subtype = pill_data.get("subtype", "")
-
         if subtype == "exp":
             # 修为丹
             return await self._use_exp_pill(player, pill_name, pill_data)

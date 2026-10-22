@@ -29,13 +29,13 @@ class RiftManager:
         ],
         2: [  # 中级秘境
             {"name": "灵草", "weight": 30, "min": 3, "max": 7},
-            {"name": "玄铁", "weight": 25, "min": 2, "max": 4},
+            {"name": "精铁", "weight": 25, "min": 2, "max": 4},
             {"name": "灵兽毛皮", "weight": 20, "min": 1, "max": 3},
             {"name": "功法残页", "weight": 15, "min": 1, "max": 1},
             {"name": "秘境精华", "weight": 10, "min": 1, "max": 2},
         ],
         3: [  # 高级秘境
-            {"name": "玄铁", "weight": 25, "min": 3, "max": 6},
+            {"name": "精铁", "weight": 25, "min": 3, "max": 6},
             {"name": "星辰石", "weight": 20, "min": 2, "max": 4},
             {"name": "灵兽内丹", "weight": 20, "min": 1, "max": 2},
             {"name": "功法残页", "weight": 20, "min": 1, "max": 2},
@@ -141,14 +141,9 @@ class RiftManager:
         if not player:
             return False, "❌ 你还未踏入修仙之路！"
         
-        # 2. 检查用户状态
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd:
-            await self.db.ext.create_user_cd(user_id)
-            user_cd = await self.db.ext.get_user_cd(user_id)
-        
-        if user_cd.type != UserStatus.IDLE:
-            return False, f"❌ 你当前正{UserStatus.get_name(user_cd.type)}，无法探索秘境！"
+        # 2. 只检查「同类活动」是否已在进行；闭关/历练可与秘境并存
+        if await self._is_exploring(user_id):
+            return False, "❌ 你已在探索秘境中，请勿重复开始！"
         
         # 3. 检查秘境
         rift = await self.db.ext.get_rift_by_id(rift_id)
@@ -163,7 +158,8 @@ class RiftManager:
         # 5. 设置探索状态，存储秘境ID
         scheduled_time = int(time.time()) + self.explore_duration
         extra_data = {"rift_id": rift_id, "rift_level": rift.rift_level}
-        await self.db.ext.set_user_busy(user_id, UserStatus.EXPLORING, scheduled_time, extra_data)
+        # 写入独立活动槽位（与闭关/历练互不覆盖）
+        await self._set_activity(user_id, "rift", scheduled_time, extra_data)
         
         return True, f"✨ 你进入了『{rift.rift_name}』！探索需要 {self.explore_duration//60} 分钟。\n使用 /完成探索 领取奖励"
     
@@ -185,20 +181,20 @@ class RiftManager:
         if not player:
             return False, "❌ 你还未踏入修仙之路！", None
         
-        # 2. 检查CD状态
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd or user_cd.type != UserStatus.EXPLORING:
+        # 2. 检查秘境活动状态
+        activity = await self._get_activity(user_id, "rift")
+        if not activity:
             return False, "❌ 你当前不在探索秘境！", None
         
         # 3. 检查时间
         current_time = int(time.time())
-        if current_time < user_cd.scheduled_time:
-            remaining = user_cd.scheduled_time - current_time
+        if current_time < activity["scheduled_time"]:
+            remaining = activity["scheduled_time"] - current_time
             minutes = remaining // 60
             return False, f"❌ 探索尚未完成！还需要 {minutes} 分钟。", None
         
         # 4. 获取秘境信息（从extra_data中读取）
-        extra_data = user_cd.get_extra_data() if hasattr(user_cd, 'get_extra_data') else {}
+        extra_data = activity.get("extra_data") or {}
         rift_id = extra_data.get("rift_id", 0)
         rift_level = extra_data.get("rift_level", 1)
         
@@ -232,7 +228,10 @@ class RiftManager:
         # 6. 物品掉落（根据秘境等级）
         dropped_items = []
         item_msg = ""
-        dropped_items = await self._roll_rift_drops(player, rift_level, event["item_chance"])
+        roll_msg = ""
+        dropped_items, roll_msg = await self._roll_rift_drops(
+            player, rift_level, event["item_chance"]
+        )
         if dropped_items:
             item_lines = []
             for item_name, count in dropped_items:
@@ -260,8 +259,13 @@ class RiftManager:
         player.gold += gold_reward
         await self.db.update_player(player)
         
-        # 8. 清除CD
-        await self.db.ext.set_user_free(user_id)
+        # 8. 清除秘境活动槽位（不影响并行中的闭关/历练）
+        await self._clear_activity(user_id, "rift")
+        
+        # 概率判定说明块（概率透明）
+        roll_block = ""
+        if roll_msg:
+            roll_block = f"\n\n🎰 命数判定：\n{roll_msg}"
         
         msg = f"""
 🌀 探索完成 - {rift_name}
@@ -271,7 +275,7 @@ class RiftManager:
 
 获得修为：+{exp_reward:,}
 获得灵石：+{gold_reward:,}{item_msg}
-        """.strip()
+{roll_block}        """.strip()
         
         reward_data = {
             "exp": exp_reward,
@@ -298,16 +302,68 @@ class RiftManager:
         if not player:
             return False, "❌ 你还未踏入修仙之路！"
         
-        # 2. 检查CD状态
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd or user_cd.type != UserStatus.EXPLORING:
+        # 2. 检查秘境活动状态
+        activity = await self._get_activity(user_id, "rift")
+        if not activity:
             return False, "❌ 你当前不在探索秘境！"
         
-        # 3. 清除CD状态
-        await self.db.ext.set_user_free(user_id)
+        # 3. 清除秘境活动槽位（不影响并行中的闭关/历练）
+        await self._clear_activity(user_id, "rift")
         
         return True, "✅ 你已退出秘境，本次探索未获得任何奖励。"
     
+    # ===== 活动槽位（与闭关/历练独立并存）=====
+
+    def _activity_mgr(self):
+        """获取多活动管理器（未注入时返回 None）"""
+        return getattr(self.db, "activity_mgr", None)
+
+    async def _is_exploring(self, user_id: str) -> bool:
+        """是否正在探索秘境"""
+        mgr = self._activity_mgr()
+        if mgr is None:
+            cd = await self.db.ext.get_user_cd(user_id)
+            return bool(cd and cd.type == UserStatus.EXPLORING)
+        return await mgr.is_active(user_id, "rift")
+
+    async def _get_activity(self, user_id: str, activity_type: str) -> Optional[dict]:
+        """读取活动槽位（降级到旧 user_cd）"""
+        mgr = self._activity_mgr()
+        if mgr is not None:
+            return await mgr.get(user_id, activity_type)
+        cd = await self.db.ext.get_user_cd(user_id)
+        legacy_map = {"cultivation": 1, "adventure": 2, "rift": 3}
+        if not cd or cd.type != legacy_map.get(activity_type):
+            return None
+        extra = {}
+        if hasattr(cd, "get_extra_data"):
+            extra = cd.get_extra_data()
+        return {
+            "create_time": cd.create_time,
+            "scheduled_time": cd.scheduled_time,
+            "extra_data": extra,
+        }
+
+    async def _set_activity(self, user_id: str, activity_type: str,
+                            scheduled_time: int, extra: dict):
+        """写入活动槽位（降级到旧 user_cd）"""
+        mgr = self._activity_mgr()
+        if mgr is not None:
+            await mgr.start(user_id, activity_type, scheduled_time, extra)
+            return
+        legacy_map = {"cultivation": 1, "adventure": 2, "rift": 3}
+        await self.db.ext.set_user_busy(
+            user_id, legacy_map.get(activity_type, 3), scheduled_time, extra_data=extra
+        )
+
+    async def _clear_activity(self, user_id: str, activity_type: str):
+        """清除活动槽位（降级到旧 user_cd）"""
+        mgr = self._activity_mgr()
+        if mgr is not None:
+            await mgr.finish(user_id, activity_type)
+            return
+        await self.db.ext.set_user_free(user_id)
+
     def _is_pill_item(self, item_name: str) -> bool:
         """检查物品是否为丹药"""
         if self.config_manager and hasattr(self.config_manager, 'is_pill'):
@@ -324,23 +380,36 @@ class RiftManager:
         else:
             return 3  # 高级秘境
     
-    async def _roll_rift_drops(self, player: Player, rift_level: int, item_chance: int) -> List[Tuple[str, int]]:
+    async def _roll_rift_drops(
+        self, player: Player, rift_level: int, item_chance: int
+    ) -> Tuple[List[Tuple[str, int]], str]:
         """
         根据秘境等级随机掉落物品
-        
+
         Args:
             player: 玩家对象
             rift_level: 秘境等级 (1-3)
             item_chance: 掉落概率
-            
+
         Returns:
-            掉落物品列表 [(物品名, 数量), ...]
+            (掉落物品列表 [(物品名, 数量), ...], 概率判定说明文本)
         """
+        from ..utils.probability import describe_roll
+
         dropped_items = []
+        roll_lines = []
         
         # 检查是否触发物品掉落
-        if random.randint(1, 100) > item_chance:
-            return dropped_items
+        hit_item = random.randint(1, 100) <= item_chance
+        if not hit_item:
+            roll_lines.append(describe_roll("物品掉落", item_chance, False))
+            # 稀有丹药判定仍需进行（低概率）
+            pill_drops, pill_roll = self._roll_pill_drops(rift_level)
+            if pill_drops:
+                dropped_items.extend(pill_drops)
+            if pill_roll:
+                roll_lines.append(pill_roll)
+            return dropped_items, "\n".join(roll_lines)
         
         # 获取对应等级的掉落表
         drop_table = self.RIFT_DROP_TABLE.get(rift_level, self.RIFT_DROP_TABLE[1])
@@ -358,7 +427,10 @@ class RiftManager:
                 break
         
         # 高级秘境有50%概率额外掉落一件
-        if rift_level >= 2 and random.randint(1, 100) <= 50:
+        extra_chance = 50 if rift_level >= 2 else 0
+        extra_hit = False
+        if extra_chance and random.randint(1, 100) <= extra_chance:
+            extra_hit = True
             roll = random.randint(1, total_weight)
             current_weight = 0
             for item in drop_table:
@@ -367,15 +439,26 @@ class RiftManager:
                     count = random.randint(item["min"], item["max"])
                     dropped_items.append((item["name"], count))
                     break
+            roll_lines.append(describe_roll("额外掉落", extra_chance, True))
+        elif extra_chance:
+            roll_lines.append(describe_roll("额外掉落", extra_chance, False))
         
         # 稀有丹药掉落检测
-        pill_drops = self._roll_pill_drops(rift_level)
+        pill_drops, pill_roll = self._roll_pill_drops(rift_level)
         if pill_drops:
             dropped_items.extend(pill_drops)
+        if pill_roll:
+            roll_lines.append(pill_roll)
         
-        return dropped_items
+        result_text = ""
+        if dropped_items:
+            result_text = f"{dropped_items[0][0]} x{dropped_items[0][1]}"
+        roll_lines.insert(
+            0, describe_roll("物品掉落", item_chance, True, result_text=result_text)
+        )
+        return dropped_items, "\n".join(roll_lines)
     
-    def _roll_pill_drops(self, rift_level: int) -> List[Tuple[str, int]]:
+    def _roll_pill_drops(self, rift_level: int) -> Tuple[List[Tuple[str, int]], str]:
         """
         根据秘境等级随机掉落稀有丹药
         
@@ -383,8 +466,10 @@ class RiftManager:
             rift_level: 秘境等级 (1-3)
             
         Returns:
-            掉落丹药列表 [(丹药名, 数量), ...]
+            (掉落丹药列表 [(物品名, 数量), ...], 概率判定说明文本)
         """
+        from ..utils.probability import describe_roll
+
         dropped_pills = []
         
         # 获取丹药掉落概率
@@ -392,7 +477,7 @@ class RiftManager:
         
         # 检查是否触发丹药掉落
         if random.randint(1, 100) > pill_chance:
-            return dropped_pills
+            return dropped_pills, describe_roll("稀有丹药", pill_chance, False)
         
         # 获取对应等级的丹药掉落表
         pill_table = self.RIFT_PILL_DROP_TABLE.get(rift_level, self.RIFT_PILL_DROP_TABLE[1])
@@ -409,4 +494,8 @@ class RiftManager:
                 dropped_pills.append((item["name"], count))
                 break
         
-        return dropped_pills
+        result_text = ""
+        if dropped_pills:
+            result_text = f"{dropped_pills[0][0]} x{dropped_pills[0][1]}"
+        return dropped_pills, describe_roll("稀有丹药", pill_chance, True, result_text=result_text)
+    

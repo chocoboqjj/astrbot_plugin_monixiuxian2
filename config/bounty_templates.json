@@ -119,14 +119,14 @@
     ],
     "gather": [
       { "name": "灵草", "weight": 45, "min": 3, "max": 6 },
-      { "name": "玄铁", "weight": 30, "min": 1, "max": 3 },
+      { "name": "精铁", "weight": 30, "min": 1, "max": 3 },
       { "name": "天材地宝", "weight": 25, "min": 1, "max": 1 }
     ],
     "hunt": [
       { "name": "灵兽毛皮", "weight": 40, "min": 1, "max": 3 },
       { "name": "妖兽精血", "weight": 30, "min": 1, "max": 2 },
       { "name": "灵兽内丹", "weight": 20, "min": 1, "max": 1 },
-      { "name": "玄铁", "weight": 10, "min": 1, "max": 3 }
+      { "name": "精铁", "weight": 10, "min": 1, "max": 3 }
     ],
     "explore": [
       { "name": "秘境精华", "weight": 35, "min": 1, "max": 2 },
@@ -136,8 +136,7 @@
     ],
     "supply": [
       { "name": "灵石碎片", "weight": 45, "min": 4, "max": 8 },
-      { "name": "精铁", "weight": 30, "min": 2, "max": 4 },
-      { "name": "玄铁", "weight": 25, "min": 1, "max": 2 }
+      { "name": "精铁", "weight": 30, "min": 2, "max": 4 }
     ],
     "mystic": [
       { "name": "功法残页", "weight": 35, "min": 1, "max": 1 },

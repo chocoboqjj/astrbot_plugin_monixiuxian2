@@ -140,10 +140,10 @@ class DatabaseExtended:
     # ===== BuffInfo 系统 CRUD =====
     
     async def create_buff_info(self, user_id: str):
-        """初始化用户的buff信息"""
+        """初始化用户的buff信息（幂等：已存在则跳过）"""
         await self.conn.execute(
             """
-            INSERT INTO buff_info (
+            INSERT OR IGNORE INTO buff_info (
                 user_id, main_buff, sec_buff, faqi_buff, fabao_weapon,
                 armor_buff, atk_buff, blessed_spot, sub_buff
             ) VALUES (?, 0, 0, 0, 0, 0, 0, 0, 0)
@@ -305,10 +305,10 @@ class DatabaseExtended:
     # ===== 传承系统 CRUD =====
     
     async def create_impart_info(self, user_id: str):
-        """初始化用户传承信息"""
+        """初始化用户传承信息（幂等：已存在则跳过）"""
         await self.conn.execute(
             """
-            INSERT INTO impart_info (
+            INSERT OR IGNORE INTO impart_info (
                 user_id, impart_hp_per, impart_mp_per, impart_atk_per,
                 impart_know_per, impart_burst_per
             ) VALUES (?, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -318,7 +318,7 @@ class DatabaseExtended:
         await self.conn.commit()
     
     async def get_impart_info(self, user_id: str) -> Optional[ImpartInfo]:
-        """获取用户传承信息"""
+        """获取用户传承信息（记录缺失时自动补建，兼容存量玩家）"""
         async with self.conn.execute(
             "SELECT * FROM impart_info WHERE user_id = ?",
             (user_id,)
@@ -326,6 +326,18 @@ class DatabaseExtended:
             row = await cursor.fetchone()
             if row:
                 return ImpartInfo(**dict(row))
+            # 自愈：老玩家可能没有这条记录，补建一条全零记录
+            try:
+                await self.create_impart_info(user_id)
+                async with self.conn.execute(
+                    "SELECT * FROM impart_info WHERE user_id = ?",
+                    (user_id,)
+                ) as cursor2:
+                    row2 = await cursor2.fetchone()
+                    if row2:
+                        return ImpartInfo(**dict(row2))
+            except Exception:
+                pass
             return None
     
     async def update_impart_info(self, impart: ImpartInfo):
@@ -392,12 +404,14 @@ class DatabaseExtended:
         import time
         import json
         extra_json = json.dumps(extra_data or {}, ensure_ascii=False)
+        # 使用 UPSERT：记录不存在时自动插入（此前纯 UPDATE 会静默失效，
+        # 导致新玩家没有 user_cd 记录、状态判断一直走"无记录"分支）
         await self.conn.execute(
             """
-            UPDATE user_cd SET type = ?, create_time = ?, scheduled_time = ?, extra_data = ?
-            WHERE user_id = ?
+            INSERT OR REPLACE INTO user_cd (user_id, type, create_time, scheduled_time, extra_data)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (busy_type, int(time.time()), scheduled_time, extra_json, user_id)
+            (user_id, busy_type, int(time.time()), scheduled_time, extra_json)
         )
         await self.conn.commit()
     
@@ -550,7 +564,26 @@ class DatabaseExtended:
         await self.conn.commit()
     
     async def complete_bounty(self, user_id: str) -> bool:
-        """完成悬赏任务"""
+        """完成悬赏任务
+
+        返回是否真的完成了任务（此前恒返回 True，调用方无法感知失败）。
+        仅当存在进行中（status=1）且进度已达标的悬赏才会被标记完成。
+        """
+        import time
+        async with self.conn.execute(
+            "SELECT current_progress, target_count, expire_time FROM bounty_tasks "
+            "WHERE user_id = ? AND status = 1",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return False
+            progress, target, expire_time = row
+            if int(progress) < int(target):
+                return False
+            if expire_time and int(time.time()) > int(expire_time):
+                return False
+
         await self.conn.execute(
             "UPDATE bounty_tasks SET status = 2 WHERE user_id = ? AND status = 1",
             (user_id,)

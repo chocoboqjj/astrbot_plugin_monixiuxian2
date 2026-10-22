@@ -9,7 +9,8 @@ from ..core import CultivationManager, PillManager
 from ..models import Player
 from ..models_extended import UserStatus
 from ..config_manager import ConfigManager
-from .utils import player_required
+from ..managers.combat_manager import CombatManager
+from .utils import player_required, get_active_activity_names
 
 CMD_START_XIUXIAN = "我要修仙"
 CMD_PLAYER_INFO = "我的信息"
@@ -133,11 +134,19 @@ class PlayerHandler:
 
         # 文本模式 (完整信息显示)
         
-        # 获取战力（综合攻防）
-        combat_power = (
-            int(total_attrs['physical_damage']) + int(total_attrs['magic_damage']) +
-            int(total_attrs['physical_defense']) + int(total_attrs['magic_defense']) +
-            int(total_attrs['mental_power']) // 10
+        # 获取战力（统一公式：攻防主体 + 精神力 + 暴击 + 生存）
+        impart_info = await self.db.ext.get_impart_info(player.user_id)
+        hp_buff = impart_info.impart_hp_per if impart_info else 0.0
+        crit_rate = int((impart_info.impart_know_per if impart_info else 0.0) * 100)
+        est_hp = int(player.experience * (1 + hp_buff) // 2)
+        combat_power = CombatManager.calculate_combat_power(
+            int(total_attrs['physical_damage']),
+            int(total_attrs['magic_damage']),
+            int(total_attrs['physical_defense']),
+            int(total_attrs['magic_defense']),
+            int(total_attrs['mental_power']),
+            est_hp,
+            crit_rate,
         )
         
         # 获取宗门信息
@@ -188,6 +197,11 @@ class PlayerHandler:
             f"  寿命：{player.lifespan}\n"
             f"  精神力：{total_attrs['mental_power']}\n"
         )
+
+        # 并行活动面板（闭关 / 历练 / 秘境 可同时进行）
+        activity_panel = await self._build_activity_panel(player)
+        if activity_panel:
+            reply_msg += activity_panel
         
         # 根据修炼类型添加不同属性
         if player.cultivation_type == "体修":
@@ -258,30 +272,39 @@ class PlayerHandler:
     @player_required
     async def handle_start_cultivation(self, player: Player, event: AstrMessageEvent):
         """处理闭关指令"""
-        # 检查是否已经在闭关
+        from ..core import ActivityType
+
+        # 只检查「同类活动」是否已在进行；历练/秘境可与闭关并存
         if player.state == "修炼中":
             yield event.plain_result("道友已在闭关中，请勿重复进入。")
-            return
-        
-        # 检查是否在其他活动中（历练、秘境探索等）
-        user_cd = await self.db.ext.get_user_cd(player.user_id)
-        if user_cd and user_cd.type != UserStatus.IDLE:
-            current_status = UserStatus.get_name(user_cd.type)
-            yield event.plain_result(f"❌ 道友当前正{current_status}，无法闭关修炼！")
             return
 
         # 记录闭关开始时间
         player.state = "修炼中"
         player.cultivation_start_time = int(time.time())
         await self.db.update_player(player)
-        await self.db.ext.set_user_busy(player.user_id, UserStatus.CULTIVATING, 0)
+
+        # 写入独立活动槽位（与历练/秘境互不覆盖）
+        activity_mgr = getattr(self.db, "activity_mgr", None)
+        if activity_mgr is not None:
+            await activity_mgr.start(player.user_id, ActivityType.CULTIVATION)
+        else:
+            await self.db.ext.set_user_busy(player.user_id, UserStatus.CULTIVATING, 0)
+
+        # 展示其他并行中的活动，让玩家知道自己还挂着什么
+        parallel = await get_active_activity_names(self.db, player.user_id)
+        parallel_note = ""
+        if parallel:
+            parallel_note = "\n📌 你当前还并行进行着：" + "、".join(parallel)
 
         yield event.plain_result(
             "🧘 道友已进入闭关状态\n"
             "━━━━━━━━━━━━━━━\n"
             "闭关期间，你将与世隔绝，潜心修炼。\n"
             f"💡 发送「{CMD_END_CULTIVATION}」结束闭关\n"
-            "⏱️ 每分钟将获得修为，受灵根资质影响。"
+            "⏱️ 每分钟将获得修为，受灵根资质影响。\n"
+            "ℹ️ 闭关不影响其他操作，可同时历练、探索秘境。"
+            + parallel_note
         )
 
     @player_required
@@ -334,12 +357,27 @@ class PlayerHandler:
                     technique_bonus = item.exp_multiplier
                     break
 
+        # 获取洞天福地的修炼加成（洞天 exp_bonus 字段即「修炼加成」）
+        blessed_land_bonus = 0.0
+        try:
+            async with self.db.conn.execute(
+                "SELECT exp_bonus FROM blessed_lands WHERE user_id = ?",
+                (player.user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    blessed_land_bonus = float(row[0] or 0.0)
+        except Exception:
+            # 洞天表可能不存在（旧库/迁移未完成），静默降级为 0
+            blessed_land_bonus = 0.0
+
         # 计算获得的修为（使用有效时长）
         gained_exp = self.cultivation_manager.calculate_cultivation_exp(
             player,
             effective_minutes,
             technique_bonus,
-            pill_multipliers
+            pill_multipliers,
+            blessed_land_bonus
         )
 
         # 更新玩家数据
@@ -347,7 +385,14 @@ class PlayerHandler:
         player.state = "空闲"
         player.cultivation_start_time = 0
         await self.db.update_player(player)
-        await self.db.ext.set_user_free(player.user_id)
+
+        # 只结束「闭关」这一个活动槽位，不影响并行中的历练/秘境
+        from ..core import ActivityType
+        activity_mgr = getattr(self.db, "activity_mgr", None)
+        if activity_mgr is not None:
+            await activity_mgr.finish(player.user_id, ActivityType.CULTIVATION)
+        else:
+            await self.db.ext.set_user_free(player.user_id)
 
         # 计算闭关时长显示
         hours = duration_minutes // 60
@@ -364,6 +409,12 @@ class PlayerHandler:
             effective_hours = MAX_CULTIVATION_MINUTES // 60
             exceed_msg = f"\n⚠️ 闭关超过{effective_hours}小时，仅计算前{effective_hours}小时修为"
 
+        # 提示其他仍在进行中的活动
+        parallel = await get_active_activity_names(self.db, player.user_id)
+        parallel_note = ""
+        if parallel:
+            parallel_note = "\n📌 你仍在进行：" + "、".join(parallel)
+
         reply_msg = (
             "🌟 道友出关成功！\n"
             "━━━━━━━━━━━━━━━\n"
@@ -372,8 +423,72 @@ class PlayerHandler:
             f"💫 当前修为：{player.experience:,}\n"
             "━━━━━━━━━━━━━━━\n"
             "道友已回归红尘，可继续修行。"
+            + parallel_note
         )
         yield event.plain_result(reply_msg)
+
+    async def _build_activity_panel(self, player: Player) -> str:
+        """构建「进行中的活动」面板（多活动并行）"""
+        import time as _time
+        activity_mgr = getattr(self.db, "activity_mgr", None)
+        if activity_mgr is None:
+            return ""
+
+        try:
+            activities = await activity_mgr.get_all(player.user_id)
+        except Exception:
+            return ""
+        if not activities:
+            return ""
+
+        names = {
+            "cultivation": "闭关",
+            "adventure": "历练",
+            "rift": "秘境探索",
+        }
+        routes = {}
+        try:
+            from ..managers.adventure_manager import AdventureManager
+            routes = {r.get("key"): r.get("name", r.get("key")) for r in
+                      (self.config_manager.adventure_config.get("routes", []) if hasattr(self.config_manager, "adventure_config") else [])}
+        except Exception:
+            routes = {}
+
+        now = int(_time.time())
+        lines = ["\n【进行中的活动】(可同时进行，互不冲突)"]
+        for act in activities:
+            atype = act.get("activity_type")
+            label = names.get(atype, atype)
+            extra = act.get("extra_data") or {}
+
+            if atype == "cultivation":
+                # 闭关时长从 players 表取
+                started = player.cultivation_start_time
+                if started:
+                    minutes = (now - started) // 60
+                    lines.append(f"  · 🧘 闭关中（已 {minutes} 分钟）")
+                else:
+                    lines.append("  · 🧘 闭关中")
+            else:
+                scheduled = act.get("scheduled_time", 0)
+                if scheduled:
+                    remain = scheduled - now
+                    if remain > 0:
+                        rem_min = remain // 60
+                        detail = f"（剩余 {rem_min} 分钟）"
+                    else:
+                        detail = "（已完成，可领取）"
+                else:
+                    detail = ""
+                if atype == "adventure":
+                    route_name = routes.get(extra.get("route_key"), extra.get("route_key", "历练"))
+                    lines.append(f"  · 🚶 {route_name} {detail}".rstrip())
+                elif atype == "rift":
+                    lines.append(f"  · 🌀 秘境探索 {detail}".rstrip())
+                else:
+                    lines.append(f"  · {label} {detail}".rstrip())
+
+        return "\n".join(lines) + "\n"
 
     @player_required
     async def handle_check_in(self, player: Player, event: AstrMessageEvent):
@@ -418,14 +533,17 @@ class PlayerHandler:
     @player_required
     async def handle_rebirth(self, player: Player, event: AstrMessageEvent, confirm_text: str = ""):
         """弃道重修（7天冷却）"""
-        user_cd = await self.db.ext.get_user_cd(player.user_id)
-        if user_cd and user_cd.type != UserStatus.IDLE:
-            status_name = UserStatus.get_name(user_cd.type)
-            yield event.plain_result(f"❌ 你当前正在「{status_name}」，无法弃道重修。")
+        # 弃道重修会清空所有数据，因此仍需结束进行中的活动（这是数据安全要求，非玩法互锁）
+        running = await get_active_activity_names(self.db, player.user_id)
+        if running:
+            yield event.plain_result(
+                f"❌ 你当前正在「{'、'.join(running)}」，无法弃道重修。\n"
+                f"💡 请先结束当前活动（出关 / 完成历练 / 退出秘境）再重修。"
+            )
             return
 
         if player.state != "空闲":
-            yield event.plain_result("❌ 只有处于空闲状态时才能弃道重修。请先结束闭关/历练等活动。")
+            yield event.plain_result("❌ 只有处于空闲状态时才能弃道重修。请先结束闭关。")
             return
 
         loan = await self.db.ext.get_active_loan(player.user_id)
@@ -460,12 +578,24 @@ class PlayerHandler:
             )
             return
 
-        await self.db.delete_player_cascade(player.user_id)
+        # 弃道重修 - 走统一惩罚入口（宗门善后 + 级联删除）
+        penalty_mgr = getattr(self.db, "penalty_mgr", None)
+        sect_note = ""
+        if penalty_mgr is not None:
+            from ..core.penalty_manager import PenaltyReason
+            ok, note = await penalty_mgr.punish(player, PenaltyReason.ABANDON_REBUILD)
+            if ok:
+                sect_note = note
+            else:
+                await self.db.delete_player_cascade(player.user_id)
+        else:
+            await self.db.delete_player_cascade(player.user_id)
         await self.db.ext.set_system_config(key, str(now))
 
         yield event.plain_result(
             "💀 你选择了弃道重修，旧生一切化为尘埃。\n"
             "━━━━━━━━━━━━━━━\n"
-            "可立即使用「我要修仙」重新踏上仙途。\n"
+            + (f"{sect_note}\n" if sect_note else "")
+            + "可立即使用「我要修仙」重新踏上仙途。\n"
             "（7天内不可再次重修）"
         )

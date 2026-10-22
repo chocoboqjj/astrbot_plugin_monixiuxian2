@@ -454,12 +454,15 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_impart_user ON impart_info(user_id)")
     
     # 创建用户CD表
+    # 注意：extra_data 列由 v20 迁移添加，但秘境/历练的 set_user_busy 写入与
+    # get_extra_data 读取都依赖它，全新安装时必须直接建出来，否则一进秘境就崩。
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS user_cd (
             user_id TEXT PRIMARY KEY,
             type INTEGER NOT NULL DEFAULT 0,
             create_time INTEGER NOT NULL DEFAULT 0,
-            scheduled_time INTEGER NOT NULL DEFAULT 0
+            scheduled_time INTEGER NOT NULL DEFAULT 0,
+            extra_data TEXT NOT NULL DEFAULT '{}'
         )
     """)
     
@@ -520,7 +523,140 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_trans_user ON bank_transactions(user_id)")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_trans_time ON bank_transactions(created_at)")
 
-    logger.info("数据库表已创建完成（v2 - 完整修仙系统）")
+    # ===== Phase 2/3/4 补充表（v14/v16/v20 的建表在此补齐）=====
+    # 说明：全新安装路径不会执行 MIGRATION_TASKS，若此处缺失，
+    # 洞天福地 / 灵田 / 双修 / 灵眼 / 悬赏 / 决斗 将直接抛 no such table。
+
+    # 悬赏任务表（v14）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS bounty_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            bounty_id INTEGER NOT NULL,
+            bounty_name TEXT NOT NULL,
+            target_type TEXT NOT NULL,
+            target_count INTEGER NOT NULL,
+            current_progress INTEGER NOT NULL DEFAULT 0,
+            rewards TEXT NOT NULL DEFAULT '{}',
+            start_time INTEGER NOT NULL,
+            expire_time INTEGER NOT NULL,
+            status INTEGER NOT NULL DEFAULT 1
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_bounty_user ON bounty_tasks(user_id)")
+
+    # 洞天福地表（v16）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS blessed_lands (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL UNIQUE,
+            land_type INTEGER NOT NULL DEFAULT 1,
+            land_name TEXT NOT NULL DEFAULT '小洞天',
+            level INTEGER NOT NULL DEFAULT 1,
+            exp_bonus REAL NOT NULL DEFAULT 0.05,
+            gold_per_hour INTEGER NOT NULL DEFAULT 100,
+            last_collect_time INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_blessed_lands_user ON blessed_lands(user_id)")
+
+    # 灵田表（v16）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS spirit_farms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL UNIQUE,
+            level INTEGER NOT NULL DEFAULT 1,
+            crops TEXT NOT NULL DEFAULT '[]'
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_spirit_farms_user ON spirit_farms(user_id)")
+
+    # 双修记录表（v16）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS dual_cultivation (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL UNIQUE,
+            last_dual_time INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_dual_user ON dual_cultivation(user_id)")
+
+    # 天地灵眼表（v16 + v20 增补 last_collect_time 列）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS spirit_eyes (
+            eye_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            eye_type INTEGER NOT NULL DEFAULT 1,
+            eye_name TEXT NOT NULL DEFAULT '下品灵眼',
+            exp_per_hour INTEGER NOT NULL DEFAULT 500,
+            spawn_time INTEGER NOT NULL,
+            owner_id TEXT,
+            owner_name TEXT,
+            claim_time INTEGER,
+            last_collect_time INTEGER
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_spirit_eyes_owner ON spirit_eyes(owner_id)")
+
+    # 双修请求持久化表（v20）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS dual_cultivation_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_id TEXT NOT NULL,
+            from_name TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_dual_req_target ON dual_cultivation_requests(target_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_dual_req_expires ON dual_cultivation_requests(expires_at)")
+
+    # 战斗冷却表（v20）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS combat_cooldowns (
+            user_id TEXT PRIMARY KEY,
+            last_duel_time INTEGER NOT NULL DEFAULT 0,
+            last_spar_time INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+    # ===== 种子数据 =====
+    # 默认秘境（v15 的种子数据；缺失会导致 /秘境列表 永远为空）
+    import json as _json
+    import time as _time
+    default_rifts = [
+        (1, "青云秘境", 1, 0, _json.dumps({"exp": [500, 1500], "gold": [200, 800]})),
+        (2, "落日峡谷", 2, 3, _json.dumps({"exp": [1500, 4000], "gold": [500, 2000]})),
+        (3, "万妖洞", 3, 6, _json.dumps({"exp": [3000, 8000], "gold": [1000, 5000]})),
+        (4, "玄冰地宫", 4, 10, _json.dumps({"exp": [5000, 15000], "gold": [2000, 10000]})),
+        (5, "上古遗迹", 5, 15, _json.dumps({"exp": [10000, 30000], "gold": [5000, 20000]})),
+    ]
+    for rift in default_rifts:
+        try:
+            await conn.execute(
+                "INSERT OR IGNORE INTO rifts (rift_id, rift_name, rift_level, required_level, rewards) VALUES (?, ?, ?, ?, ?)",
+                rift
+            )
+        except Exception:
+            pass
+
+    # 初始灵眼（v16 的种子数据）
+    now = int(_time.time())
+    initial_eyes = [
+        (1, "下品灵眼", 500, now),
+        (1, "下品灵眼", 500, now),
+        (2, "中品灵眼", 2000, now),
+    ]
+    for eye in initial_eyes:
+        try:
+            await conn.execute(
+                "INSERT INTO spirit_eyes (eye_type, eye_name, exp_per_hour, spawn_time) VALUES (?, ?, ?, ?)",
+                eye
+            )
+        except Exception:
+            pass
+
+    logger.info("数据库表已创建完成（v2 - 完整修仙系统，含 Phase 2/3/4 补充表与种子数据）")
 
 
 @migration(12)

@@ -117,12 +117,21 @@ class RankingManager:
             
             # 排行榜显示基础战力，不含临时丹药效果（更公平）
             total_attrs = player.get_total_attributes(equipped_items, None)
-            
-            # 战力 = 物伤 + 法伤 + 物防 + 法防 + 精神力/10
-            combat_power = (
-                int(total_attrs['physical_damage']) + int(total_attrs['magic_damage']) +
-                int(total_attrs['physical_defense']) + int(total_attrs['magic_defense']) +
-                int(total_attrs['mental_power']) // 10
+
+            # 与玩家面板共用统一战力公式（含 HP/暴击/精神力）
+            impart_info = await self.db.ext.get_impart_info(player.user_id)
+            hp_buff = impart_info.impart_hp_per if impart_info else 0.0
+            crit_rate = int((impart_info.impart_know_per if impart_info else 0.0) * 100)
+            est_hp = int(player.experience * (1 + hp_buff) // 2)
+
+            combat_power = self.combat_mgr.calculate_combat_power(
+                int(total_attrs['physical_damage']),
+                int(total_attrs['magic_damage']),
+                int(total_attrs['physical_defense']),
+                int(total_attrs['magic_defense']),
+                int(total_attrs['mental_power']),
+                est_hp,
+                crit_rate,
             )
             player_power.append((player, combat_power, total_attrs))
         

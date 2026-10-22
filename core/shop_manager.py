@@ -16,6 +16,20 @@ class ShopManager:
         self.config = config
         self.config_manager = config_manager
 
+    def _get_value(self, key: str, default=None):
+        """读取插件配置项。
+
+        `_conf_schema.json` 中所有商店相关配置都位于 `VALUES` 嵌套对象内，
+        实际配置值形如 `config["VALUES"]["PAVILION_PILL_COUNT"]`。
+        此处统一兼容两种层级：优先读 `VALUES`，再退回顶层，最后用默认值。
+        """
+        values = self.config.get("VALUES", None)
+        if isinstance(values, dict) and key in values:
+            return values[key]
+        if key in self.config:
+            return self.config[key]
+        return default
+
     def _format_required_level(self, level_index: int) -> str:
         """同时展示灵修/体修的需求境界名称"""
         names = []
@@ -148,7 +162,7 @@ class ShopManager:
             库存数量（最小为1）
         """
         # 获取库存计算基数，默认100
-        stock_divisor = self.config.get("SHOP_STOCK_DIVISOR", 100)
+        stock_divisor = self._get_value("SHOP_STOCK_DIVISOR", 100)
 
         # 库存 = 权重 / 基数，向上取整，最小为1
         stock = max(1, (weight + stock_divisor - 1) // stock_divisor)
@@ -197,8 +211,8 @@ class ShopManager:
         selected_items = self._weighted_random_choice(all_items, count)
 
         # 获取折扣配置
-        discount_min = self.config.get("SHOP_DISCOUNT_MIN", 0.8)
-        discount_max = self.config.get("SHOP_DISCOUNT_MAX", 1.2)
+        discount_min = self._get_value("SHOP_DISCOUNT_MIN", 0.8)
+        discount_max = self._get_value("SHOP_DISCOUNT_MAX", 1.2)
 
         # 生成商店物品
         shop_items = []
@@ -227,7 +241,7 @@ class ShopManager:
     def should_refresh_shop(self, last_refresh_time: int, refresh_hours: int = None) -> bool:
         """检查是否需要刷新"""
         if refresh_hours is None:
-            refresh_hours = self.config.get("SHOP_REFRESH_HOURS", 6)
+            refresh_hours = self._get_value("PAVILION_REFRESH_HOURS", 6)
         if refresh_hours <= 0:
             return False
         return (int(time.time()) - last_refresh_time) >= (refresh_hours * 3600)
@@ -238,8 +252,8 @@ class ShopManager:
         selected = self._weighted_random_choice(
             [{'weight': i.get('data', {}).get('shop_weight', 100), **i} for i in base_items], count
         )
-        discount_min = self.config.get("SHOP_DISCOUNT_MIN", 0.8)
-        discount_max = self.config.get("SHOP_DISCOUNT_MAX", 1.2)
+        discount_min = self._get_value("SHOP_DISCOUNT_MIN", 0.8)
+        discount_max = self._get_value("SHOP_DISCOUNT_MAX", 1.2)
         result = []
         for item in selected:
             discount = random.uniform(discount_min, discount_max)

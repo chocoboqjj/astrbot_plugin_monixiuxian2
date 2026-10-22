@@ -288,8 +288,21 @@ class BreakthroughManager:
                     # 返回False（突破失败），消息，False（未真正死亡）
                     return False, resurrection_msg, False
 
-                # 玩家死亡 - 级联删除所有关联数据
-                await self.db.delete_player_cascade(player.user_id)
+                # 玩家死亡 - 统一惩罚入口（宗门善后 + 级联删除所有关联数据）
+                penalty_mgr = getattr(self.db, "penalty_mgr", None)
+                sect_note = ""
+                if penalty_mgr is not None:
+                    from .penalty_manager import PenaltyReason
+                    ok, note = await penalty_mgr.punish(
+                        player, PenaltyReason.BREAKTHROUGH_DEATH
+                    )
+                    if ok:
+                        sect_note = note
+                    else:
+                        logger.error(f"[BreakthroughManager] 统一惩罚失败，兜底级联删除: {note}")
+                        await self.db.delete_player_cascade(player.user_id)
+                else:
+                    await self.db.delete_player_cascade(player.user_id)
 
                 death_msg = (
                     f"💀 突破失败，走火入魔！💀\n"
@@ -298,7 +311,8 @@ class BreakthroughManager:
                     f"━━━━━━━━━━━━━━━\n"
                     f"你在突破【{next_level_name}】时走火入魔，身死道消...\n"
                     f"所有修为和装备化为虚无\n"
-                    f"若想重新修仙，请使用'我要修仙'命令重新开始"
+                    + (f"{sect_note}\n" if sect_note else "")
+                    + f"若想重新修仙，请使用'我要修仙'命令重新开始"
                 )
 
                 logger.info(

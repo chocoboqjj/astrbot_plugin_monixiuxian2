@@ -56,6 +56,19 @@ class StorageRingManager:
             return f"⚠️ 储物戒空间不足！仅剩{available}格({used}/{capacity}格)"
         return None
 
+    @staticmethod
+    def _sync_ring_items_to_caller(caller_player: Player, fresh_player: Player) -> None:
+        """把最新的储物戒内容同步回调用方持有的 player 对象。
+
+        调用方在存取物品之后通常会对整个 player 做全量 UPDATE（43 个字段），
+        而它持有的 player 是存取操作之前的旧快照。若不把新内容同步回去，
+        调用方的旧快照会把本次变更覆盖掉（lost update）：
+        例如装备时剑同时留在储物戒和装备栏、购买时物品没进包、掉落直接丢失。
+
+        失败路径不会调用本方法，调用方对象保持原样。
+        """
+        caller_player.set_storage_ring_items(fresh_player.get_storage_ring_items())
+
     def is_pill(self, item_name: str) -> bool:
         """检查物品是否为丹药类型"""
         return self.config_manager.is_pill(item_name)
@@ -74,7 +87,7 @@ class StorageRingManager:
 
     async def store_item(self, player: Player, item_name: str, count: int = 1, silent: bool = False, external_transaction: bool = False) -> Tuple[bool, str]:
         """将物品存入储物戒（带事务保护）
-        
+
         Args:
             external_transaction: 如果为True，表示外部已有事务，跳过内部事务管理
         """
@@ -90,30 +103,33 @@ class StorageRingManager:
                 if not external_transaction:
                     await self.db.conn.rollback()
                 return False, "玩家不存在或已被删除"
-            player = fresh_player
-            items = player.get_storage_ring_items()
+            items = fresh_player.get_storage_ring_items()
 
             if item_name not in items:
-                available = self.get_available_slots(player)
+                available = self.get_available_slots(fresh_player)
                 if available <= 0:
                     if not external_transaction:
                         await self.db.conn.rollback()
-                    capacity = self.get_ring_capacity(player.storage_ring)
+                    capacity = self.get_ring_capacity(fresh_player.storage_ring)
                     return False, f"储物戒已满！({capacity}/{capacity}格)"
 
             items[item_name] = items.get(item_name, 0) + count
-            player.set_storage_ring_items(items)
-            await self.db.update_player(player)
+            fresh_player.set_storage_ring_items(items)
+            # 外部事务由调用方负责提交/回滚，此处不能自行 commit
+            await self.db.update_player(fresh_player, commit=not external_transaction)
             if not external_transaction:
                 await self.db.conn.commit()
 
-            capacity = self.get_ring_capacity(player.storage_ring)
-            used = self.get_used_slots(player)
+            # 提交成功后把最新储物戒内容同步回调用方的 player 对象
+            self._sync_ring_items_to_caller(player, fresh_player)
+
+            capacity = self.get_ring_capacity(fresh_player.storage_ring)
+            used = self.get_used_slots(fresh_player)
 
             if silent:
                 return True, ""
 
-            warning = self.get_space_warning(player)
+            warning = self.get_space_warning(fresh_player)
             msg = f"已将【{item_name}】x{count} 存入储物戒（{used}/{capacity}格）"
             if warning:
                 msg += f"\n{warning}"
@@ -124,20 +140,31 @@ class StorageRingManager:
                 await self.db.conn.rollback()
             raise
 
-    async def retrieve_item(self, player: Player, item_name: str, count: int = 1) -> Tuple[bool, str]:
-        """从储物戒取出物品（带事务保护）"""
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+    async def retrieve_item(self, player: Player, item_name: str, count: int = 1, external_transaction: bool = False) -> Tuple[bool, str]:
+        """从储物戒取出物品（带事务保护）
+
+        Args:
+            external_transaction: 如果为True，表示外部已有事务，跳过内部事务管理
+        """
+        if not external_transaction:
+            await self.db.conn.execute("BEGIN IMMEDIATE")
         try:
-            player = await self.db.get_player_by_id(player.user_id)
-            items = player.get_storage_ring_items()
+            fresh_player = await self.db.get_player_by_id(player.user_id)
+            if not fresh_player:
+                if not external_transaction:
+                    await self.db.conn.rollback()
+                return False, "玩家不存在或已被删除"
+            items = fresh_player.get_storage_ring_items()
 
             if item_name not in items:
-                await self.db.conn.rollback()
+                if not external_transaction:
+                    await self.db.conn.rollback()
                 return False, f"储物戒中没有【{item_name}】"
 
             current_count = items[item_name]
             if count > current_count:
-                await self.db.conn.rollback()
+                if not external_transaction:
+                    await self.db.conn.rollback()
                 return False, f"储物戒中【{item_name}】数量不足（当前：{current_count}个）"
 
             if count >= current_count:
@@ -145,31 +172,48 @@ class StorageRingManager:
             else:
                 items[item_name] = current_count - count
 
-            player.set_storage_ring_items(items)
-            await self.db.update_player(player)
-            await self.db.conn.commit()
+            fresh_player.set_storage_ring_items(items)
+            # 外部事务由调用方负责提交/回滚，此处不能自行 commit
+            await self.db.update_player(fresh_player, commit=not external_transaction)
+            if not external_transaction:
+                await self.db.conn.commit()
 
-            capacity = self.get_ring_capacity(player.storage_ring)
-            used = self.get_used_slots(player)
+            # 提交成功后把最新储物戒内容同步回调用方的 player 对象
+            self._sync_ring_items_to_caller(player, fresh_player)
+
+            capacity = self.get_ring_capacity(fresh_player.storage_ring)
+            used = self.get_used_slots(fresh_player)
             return True, f"已从储物戒取出【{item_name}】x{count}（{used}/{capacity}格）"
         except Exception:
-            await self.db.conn.rollback()
+            if not external_transaction:
+                await self.db.conn.rollback()
             raise
 
-    async def discard_item(self, player: Player, item_name: str, count: int = 1) -> Tuple[bool, str]:
-        """丢弃储物戒中的物品（带事务保护）"""
-        await self.db.conn.execute("BEGIN IMMEDIATE")
+    async def discard_item(self, player: Player, item_name: str, count: int = 1, external_transaction: bool = False) -> Tuple[bool, str]:
+        """丢弃储物戒中的物品（带事务保护）
+
+        Args:
+            external_transaction: 如果为True，表示外部已有事务，跳过内部事务管理
+        """
+        if not external_transaction:
+            await self.db.conn.execute("BEGIN IMMEDIATE")
         try:
-            player = await self.db.get_player_by_id(player.user_id)
-            items = player.get_storage_ring_items()
+            fresh_player = await self.db.get_player_by_id(player.user_id)
+            if not fresh_player:
+                if not external_transaction:
+                    await self.db.conn.rollback()
+                return False, "玩家不存在或已被删除"
+            items = fresh_player.get_storage_ring_items()
 
             if item_name not in items:
-                await self.db.conn.rollback()
+                if not external_transaction:
+                    await self.db.conn.rollback()
                 return False, f"储物戒中没有【{item_name}】"
 
             current_count = items[item_name]
             if count > current_count:
-                await self.db.conn.rollback()
+                if not external_transaction:
+                    await self.db.conn.rollback()
                 return False, f"储物戒中【{item_name}】数量不足（当前：{current_count}个）"
 
             if count >= current_count:
@@ -179,15 +223,21 @@ class StorageRingManager:
                 items[item_name] = current_count - count
                 discard_count = count
 
-            player.set_storage_ring_items(items)
-            await self.db.update_player(player)
-            await self.db.conn.commit()
+            fresh_player.set_storage_ring_items(items)
+            # 外部事务由调用方负责提交/回滚，此处不能自行 commit
+            await self.db.update_player(fresh_player, commit=not external_transaction)
+            if not external_transaction:
+                await self.db.conn.commit()
 
-            capacity = self.get_ring_capacity(player.storage_ring)
-            used = self.get_used_slots(player)
+            # 提交成功后把最新储物戒内容同步回调用方的 player 对象
+            self._sync_ring_items_to_caller(player, fresh_player)
+
+            capacity = self.get_ring_capacity(fresh_player.storage_ring)
+            used = self.get_used_slots(fresh_player)
             return True, f"已丢弃【{item_name}】x{discard_count}（{used}/{capacity}格）"
         except Exception:
-            await self.db.conn.rollback()
+            if not external_transaction:
+                await self.db.conn.rollback()
             raise
 
     def check_upgrade_requirement(self, player: Player, new_ring_name: str) -> Tuple[bool, str]:

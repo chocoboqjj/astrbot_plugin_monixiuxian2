@@ -70,8 +70,9 @@ class BlessedLandManager:
         return True, (
             f"✨ 恭喜获得【{land_config['name']}】！\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"修炼加成：+{land_config['exp_bonus']:.0%}\n"
-            f"每小时产出：{land_config['gold_per_hour']} 灵石\n"
+            f"闭关修炼加成：+{land_config['exp_bonus']:.0%}\n"
+            f"挂机产出：{land_config['gold_per_hour']} 灵石 + "
+            f"{land_config.get('max_exp_per_hour', 5000)} 修为 /小时\n"
             f"━━━━━━━━━━━━━━━\n"
             f"使用 /洞天收取 领取产出"
         )
@@ -115,8 +116,9 @@ class BlessedLandManager:
         return True, (
             f"🎉 {land['land_name']}升级到 Lv.{new_level}！\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"修炼加成：+{new_exp_bonus:.1%}\n"
-            f"每小时产出：{new_gold_per_hour} 灵石\n"
+            f"闭关修炼加成：+{new_exp_bonus:.1%}\n"
+            f"挂机产出：{new_gold_per_hour} 灵石 + "
+            f"{config.get('max_exp_per_hour', 5000)} 修为 /小时\n"
             f"花费：{upgrade_cost:,} 灵石"
         )
     
@@ -139,12 +141,15 @@ class BlessedLandManager:
         hours = min(24, int(hours_passed))
         gold_income = land["gold_per_hour"] * hours
         
-        # 计算修为收益，并限制上限防止高修为玩家收益无限增长
+        # 计算修为收益
+        # 设计说明：
+        #   - exp_bonus 是「修炼加成」百分比，直接作用于闭关修炼速度（见 player_handler 闭关结算）
+        #   - 洞天的**挂机修为产出**按配置项 max_exp_per_hour 固定发放，
+        #     不再以 player.experience 为基数（那会造成「越强收益越多」的复利膨胀）
         land_type = land["land_type"]
         config = BLESSED_LANDS.get(land_type, BLESSED_LANDS[1])
         max_exp_per_hour = config.get("max_exp_per_hour", 5000)
-        exp_income = int(player.experience * land["exp_bonus"] * hours * 0.01)
-        exp_income = min(exp_income, max_exp_per_hour * hours)
+        exp_income = max_exp_per_hour * hours
         
         player.gold += gold_income
         player.experience += exp_income
@@ -190,8 +195,9 @@ class BlessedLandManager:
         return (
             f"🏔️ {land['land_name']} (Lv.{land['level']})\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"修炼加成：+{land['exp_bonus']:.1%}\n"
-            f"每小时产出：{land['gold_per_hour']} 灵石\n"
+            f"闭关修炼加成：+{land['exp_bonus']:.1%}\n"
+            f"挂机产出：{land['gold_per_hour']} 灵石 + "
+            f"{BLESSED_LANDS.get(land['land_type'], BLESSED_LANDS[1]).get('max_exp_per_hour', 5000)} 修为 /小时\n"
             f"━━━━━━━━━━━━━━━\n"
             f"待收取：约 {pending_gold:,} 灵石\n"
             f"━━━━━━━━━━━━━━━\n"

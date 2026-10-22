@@ -12,10 +12,15 @@ __all__ = ["ImpartPkManager"]
 class ImpartPkManager:
     """传承PK管理器 - 玩家间争夺传承的战斗"""
     
-    def __init__(self, db: DataBase, combat_mgr: CombatManager):
+    def __init__(self, db: DataBase, combat_mgr: CombatManager, config_manager=None):
         self.db = db
         self.combat_mgr = combat_mgr
+        self.config_manager = config_manager
     
+    def _equipment_bonus(self, player) -> dict:
+        """复用 CombatManager 的装备加成计算，保持与决斗一致。"""
+        return CombatManager.calculate_equipment_bonus(self.config_manager, player)
+
     async def challenge_impart(self, attacker: Player, defender: Player) -> Tuple[bool, str, dict]:
         """发起传承挑战
         
@@ -30,9 +35,15 @@ class ImpartPkManager:
         attacker_impart = await self.db.ext.get_impart_info(attacker.user_id)
         defender_impart = await self.db.ext.get_impart_info(defender.user_id)
         
-        # 准备战斗属性
-        atk_stats = await self.combat_mgr.calculate_combat_stats(attacker)
-        def_stats = await self.combat_mgr.calculate_combat_stats(defender)
+        # 准备战斗属性（含传承加成与装备加成，与决斗战斗一致）
+        atk_equip = self._equipment_bonus(attacker)
+        def_equip = self._equipment_bonus(defender)
+        atk_stats = self.combat_mgr.calculate_combat_stats(
+            attacker, attacker_impart, atk_equip["atk"], atk_equip["defense"]
+        )
+        def_stats = self.combat_mgr.calculate_combat_stats(
+            defender, defender_impart, def_equip["atk"], def_equip["defense"]
+        )
         
         # 战斗模拟
         atk_hp = atk_stats.hp

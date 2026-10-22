@@ -180,6 +180,17 @@ class Player:
         """设置丹药背包"""
         self.pills_inventory = json.dumps(inventory, ensure_ascii=False)
 
+    def get_daily_pill_usage(self) -> dict:
+        """获取今日已服用丹药次数（按丹药名统计）"""
+        try:
+            return json.loads(self.daily_pill_usage)
+        except json.JSONDecodeError:
+            return {}
+
+    def set_daily_pill_usage(self, usage: dict):
+        """设置今日已服用丹药次数"""
+        self.daily_pill_usage = json.dumps(usage, ensure_ascii=False)
+
     def get_storage_ring_items(self) -> dict:
         """获取储物戒物品"""
         try:

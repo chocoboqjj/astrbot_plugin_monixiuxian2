@@ -163,13 +163,9 @@ class AdventureManager:
         if not player:
             return False, "❌ 你还未踏入修仙之路！"
 
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd:
-            await self.db.ext.create_user_cd(user_id)
-            user_cd = await self.db.ext.get_user_cd(user_id)
-
-        if user_cd.type != UserStatus.IDLE:
-            return False, f"❌ 你当前正{UserStatus.get_name(user_cd.type)}，无法开始历练！"
+        # 只检查「同类活动」是否已在进行；闭关/秘境可与历练并存
+        if await self._is_adventuring(user_id):
+            return False, "❌ 你已在历练中，请勿重复开始！"
 
         route_key = self._resolve_route(route_token)
         route = self.routes.get(route_key)
@@ -189,7 +185,8 @@ class AdventureManager:
         duration = route.get("duration", 3600)
         scheduled_time = now + duration
         extra = {"route_key": route_key}
-        await self.db.ext.set_user_busy(user_id, UserStatus.ADVENTURING, scheduled_time, extra_data=extra)
+        # 写入独立活动槽位（与闭关/秘境互不覆盖）
+        await self._set_activity(user_id, "adventure", scheduled_time, extra)
 
         fatigue = route.get("fatigue_cooldown", 0)
         hint = [
@@ -209,42 +206,36 @@ class AdventureManager:
         if not player:
             return False, "❌ 你还未踏入修仙之路！", None
 
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd or user_cd.type != UserStatus.ADVENTURING:
+        activity = await self._get_activity(user_id, "adventure")
+        if not activity:
             return False, "❌ 你当前不在历练中！", None
 
         now = int(time.time())
-        if now < user_cd.scheduled_time:
-            remaining = user_cd.scheduled_time - now
+        if now < activity["scheduled_time"]:
+            remaining = activity["scheduled_time"] - now
             minutes = remaining // 60
             seconds = remaining % 60
             return False, f"❌ 历练尚未完成！还需 {minutes}分{seconds}秒。", None
 
-        extra = {}
-        if hasattr(user_cd, "get_extra_data"):
-            extra = user_cd.get_extra_data()
-        else:
-            try:
-                extra = json.loads(getattr(user_cd, "extra_data", "{}") or "{}")
-            except Exception:
-                extra = {}
+        extra = activity.get("extra_data") or {}
 
         route = self.routes.get(extra.get("route_key", self.default_route_key)) or self.routes.get(self.default_route_key)
         if not route:
             return False, "❌ 未找到历练路线配置，请联系管理员。", None
 
-        adventure_duration = now - user_cd.create_time
-        scheduled_duration = max(1, user_cd.scheduled_time - user_cd.create_time)
+        adventure_duration = now - activity["create_time"]
+        scheduled_duration = max(1, activity["scheduled_time"] - activity["create_time"])
         effective_duration = min(adventure_duration, scheduled_duration)
         event = self._trigger_route_event(route)
 
         rewards = self._calculate_rewards(player, route, effective_duration, event)
-        dropped_items, item_msg = await self._handle_drops(player, route, event)
+        dropped_items, item_msg, roll_msg = await self._handle_drops(player, route, event)
 
         player.experience += rewards["exp"]
         player.gold += rewards["gold"]
         await self.db.update_player(player)
-        await self.db.ext.set_user_free(user_id)
+        # 只结束「历练」槽位，不影响并行中的闭关/秘境
+        await self._clear_activity(user_id, "adventure")
 
         fatigue = route.get("fatigue_cooldown", 0)
         if event.get("injury"):
@@ -255,6 +246,7 @@ class AdventureManager:
 
         fatigue_hint = f"\n⏳ 该路线休整：{fatigue // 60} 分钟" if fatigue else ""
         display_minutes = effective_duration // 60
+        roll_block = f"\n🎰 命数判定：{roll_msg}" if roll_msg else ""
         msg = (
             f"🚶 历练归来 · {route['name']}\n"
             f"━━━━━━━━━━━━━━━\n"
@@ -263,6 +255,7 @@ class AdventureManager:
             f"获得修为：+{rewards['exp']:,}\n"
             f"获得灵石：+{rewards['gold']:,}"
             f"{item_msg}"
+            f"{roll_block}"
             f"\n━━━━━━━━━━━━━━━\n"
             f"当前修为：{player.experience:,}\n"
             f"当前灵石：{player.gold:,}"
@@ -285,29 +278,22 @@ class AdventureManager:
 
     async def check_adventure_status(self, user_id: str) -> Tuple[bool, str]:
         """查看历练状态"""
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd or user_cd.type != UserStatus.ADVENTURING:
+        activity = await self._get_activity(user_id, "adventure")
+        if not activity:
             return False, "❌ 你当前不在历练中！"
 
         now = int(time.time())
         route_name = "未知路线"
-        extra = {}
-        if hasattr(user_cd, "get_extra_data"):
-            extra = user_cd.get_extra_data()
-        else:
-            try:
-                extra = json.loads(getattr(user_cd, "extra_data", "{}") or "{}")
-            except Exception:
-                extra = {}
+        extra = activity.get("extra_data") or {}
         route = self.routes.get(extra.get("route_key", self.default_route_key))
         if route:
             route_name = route["name"]
 
-        if now >= user_cd.scheduled_time:
+        if now >= activity["scheduled_time"]:
             return True, f"✅ {route_name} 已完成！使用 /完成历练 领取奖励。"
 
-        remaining = user_cd.scheduled_time - now
-        elapsed = now - user_cd.create_time
+        remaining = activity["scheduled_time"] - now
+        elapsed = now - activity["create_time"]
         minutes = remaining // 60
         seconds = remaining % 60
         elapsed_minutes = elapsed // 60
@@ -322,6 +308,59 @@ class AdventureManager:
         return True, msg
 
     # -------- 内部工具 --------
+
+    # ===== 活动槽位（与闭关/秘境独立并存）=====
+
+    def _activity_mgr(self):
+        """获取多活动管理器（未注入时返回 None）"""
+        return getattr(self.db, "activity_mgr", None)
+
+    async def _is_adventuring(self, user_id: str) -> bool:
+        """是否正在历练"""
+        mgr = self._activity_mgr()
+        if mgr is None:
+            cd = await self.db.ext.get_user_cd(user_id)
+            return bool(cd and cd.type == UserStatus.ADVENTURING)
+        return await mgr.is_active(user_id, "adventure")
+
+    async def _get_activity(self, user_id: str, activity_type: str) -> Optional[dict]:
+        """读取活动槽位（降级到旧 user_cd）"""
+        mgr = self._activity_mgr()
+        if mgr is not None:
+            return await mgr.get(user_id, activity_type)
+        # 降级路径
+        cd = await self.db.ext.get_user_cd(user_id)
+        legacy_map = {"cultivation": 1, "adventure": 2, "rift": 3}
+        if not cd or cd.type != legacy_map.get(activity_type):
+            return None
+        extra = {}
+        if hasattr(cd, "get_extra_data"):
+            extra = cd.get_extra_data()
+        return {
+            "create_time": cd.create_time,
+            "scheduled_time": cd.scheduled_time,
+            "extra_data": extra,
+        }
+
+    async def _set_activity(self, user_id: str, activity_type: str,
+                            scheduled_time: int, extra: dict):
+        """写入活动槽位（降级到旧 user_cd）"""
+        mgr = self._activity_mgr()
+        if mgr is not None:
+            await mgr.start(user_id, activity_type, scheduled_time, extra)
+            return
+        legacy_map = {"cultivation": 1, "adventure": 2, "rift": 3}
+        await self.db.ext.set_user_busy(
+            user_id, legacy_map.get(activity_type, 2), scheduled_time, extra_data=extra
+        )
+
+    async def _clear_activity(self, user_id: str, activity_type: str):
+        """清除活动槽位（降级到旧 user_cd）"""
+        mgr = self._activity_mgr()
+        if mgr is not None:
+            await mgr.finish(user_id, activity_type)
+            return
+        await self.db.ext.set_user_free(user_id)
 
     def _resolve_route(self, token: str) -> str:
         if not token:
@@ -363,14 +402,23 @@ class AdventureManager:
         final_gold = max(0, int(gold_total * event.get("gold_mult", 1.0)))
         return {"exp": final_exp, "gold": final_gold}
 
-    async def _handle_drops(self, player: Player, route: dict, event: dict) -> Tuple[List[Tuple[str, int]], str]:
+    async def _handle_drops(
+        self, player: Player, route: dict, event: dict
+    ) -> Tuple[List[Tuple[str, int]], str, str]:
+        """处理历练掉落
+
+        Returns:
+            (掉落物品列表, 物品提示文本, 概率判定说明)
+        """
+        from ..utils.probability import describe_roll
+
         dropped_items: List[Tuple[str, int]] = []
         if not self.storage_ring_manager:
-            return dropped_items, ""
+            return dropped_items, "", ""
 
         item_chance = event.get("item_chance", 40)
         if random.randint(1, 100) > item_chance:
-            return dropped_items, ""
+            return dropped_items, "", describe_roll("物品掉落", item_chance, False)
 
         tier = event.get("drop_tier") or route.get("drop_tier") or "low"
         drop_table = self.drop_tables.get(tier, self.DEFAULT_CONFIG["drop_tables"]["low"])
@@ -395,6 +443,10 @@ class AdventureManager:
             else:
                 item_lines.append(f"  · {item_name} x{qty}（储物戒已满，丢失）")
 
+        roll_msg = describe_roll(
+            "物品掉落", item_chance, True,
+            result_text=f"{dropped_items[0][0]} x{dropped_items[0][1]}"
+        )
         if item_lines:
-            return dropped_items, "\n\n📦 获得物品：\n" + "\n".join(item_lines)
-        return dropped_items, ""
+            return dropped_items, "\n\n📦 获得物品：\n" + "\n".join(item_lines), roll_msg
+        return dropped_items, "", roll_msg

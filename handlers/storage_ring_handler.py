@@ -20,11 +20,15 @@ CMD_STORE_ALL = "存入所有"
 CMD_RETRIEVE_ALL = "取出所有"
 CMD_SEARCH_ITEM = "搜索物品"
 CMD_VIEW_CATEGORY = "查看分类"
+CMD_RECYCLE_ITEM = "回收"
+
+# 回收折算比例：按物品售价折算为灵石（低于 1 按 1 计）
+RECYCLE_RATE = 0.5
 
 # 物品分类定义
 ITEM_CATEGORIES = {
-    "材料": ["灵草", "精铁", "玄铁", "星辰石", "灵石碎片", "灵兽毛皮", "灵兽内丹", 
-             "妖兽精血", "功法残页", "秘境精华", "天材地宝", "混沌精华", "神兽之骨", 
+    "材料": ["灵草", "精铁", "星辰石", "灵石碎片", "灵兽毛皮", "灵兽内丹",
+             "妖兽精血", "功法残页", "秘境精华", "天材地宝", "混沌精华", "神兽之骨",
              "远古秘籍", "仙器碎片"],
     "装备": ["武器", "防具", "法器"],
     "功法": ["心法", "技能"],
@@ -182,14 +186,13 @@ class StorageRingHandler:
         
         for comp in message_chain:
             if isinstance(comp, At):
-                # 兼容多种At属性名
+                # 兼容多种 At 属性名（OneBot 的 qq/uin/target 与 QQ 官方机器人的 user_id）
                 if target_id is None:
-                    if hasattr(comp, 'qq'):
-                        target_id = str(comp.qq)
-                    elif hasattr(comp, 'target'):
-                        target_id = str(comp.target)
-                    elif hasattr(comp, 'uin'):
-                        target_id = str(comp.uin)
+                    for attr in ("qq", "target", "uin", "user_id"):
+                        val = getattr(comp, attr, None)
+                        if val:
+                            target_id = str(val).lstrip("@")
+                            break
             elif isinstance(comp, Plain):
                 text_parts.append(comp.text)
 
@@ -223,7 +226,7 @@ class StorageRingHandler:
             yield event.plain_result(
                 f"请指定赠予对象\n"
                 f"用法：{CMD_GIFT_ITEM} @某人 物品名 [数量]\n"
-                f"或：{CMD_GIFT_ITEM} QQ号 物品名 [数量]\n"
+                f"或：{CMD_GIFT_ITEM} 用户ID 物品名 [数量]\n"
                 f"示例：{CMD_GIFT_ITEM} 123456789 精铁 5"
             )
             return
@@ -247,7 +250,7 @@ class StorageRingHandler:
 
         target_player = await self.db.get_player_by_id(target_id)
         if not target_player:
-            yield event.plain_result(f"目标玩家（QQ:{target_id}）尚未开始修仙")
+            yield event.plain_result(f"目标玩家（ID:{target_id}）尚未开始修仙")
             return
 
         if target_id == player.user_id:
@@ -436,6 +439,67 @@ class StorageRingHandler:
         return {k: v for k, v in result.items() if v}
 
     @player_required
+    async def handle_recycle_item(self, player: Player, event: AstrMessageEvent, args: str):
+        """回收储物戒中的物品，按售价折算为灵石"""
+        if not args or args.strip() == "":
+            yield event.plain_result(
+                f"请指定要回收的物品\n"
+                f"用法：{CMD_RECYCLE_ITEM} 物品名 [数量]\n"
+                f"示例：{CMD_RECYCLE_ITEM} 灵草 5\n"
+                f"💡 按物品售价的 {int(RECYCLE_RATE * 100)}% 折算灵石（至少 1 灵石/个），回收后不可找回"
+            )
+            return
+
+        args = args.strip()
+        parts = args.rsplit(" ", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            item_name = parts[0]
+            count = int(parts[1])
+        else:
+            item_name = args
+            count = 1
+
+        if count <= 0:
+            yield event.plain_result("数量必须大于0")
+            return
+
+        # 跨所有物品表按名称解析售价
+        cfg = self.config_manager
+        item_cfg = (
+            cfg.items_data.get(item_name)
+            or cfg.weapons_data.get(item_name)
+            or cfg.pills_data.get(item_name)
+            or cfg.exp_pills_data.get(item_name)
+            or cfg.utility_pills_data.get(item_name)
+        )
+        if not item_cfg or not item_cfg.get("price"):
+            yield event.plain_result(
+                f"❌ 未找到「{item_name}」的回收价，该物品无法回收（可能是专属道具）"
+            )
+            return
+
+        price = item_cfg["price"]
+        unit = max(1, int(price * RECYCLE_RATE))
+        total = unit * count
+
+        # 先移除物品：复用 discard_item（已修复 lost update，会同步最新储物戒回 player）
+        success, message = await self.storage_ring_manager.discard_item(player, item_name, count)
+        if not success:
+            yield event.plain_result(f"❌ {message}")
+            return
+
+        # discard_item 已把最新储物戒同步回 player，这里仅加灵石后写回
+        player.gold += total
+        await self.db.update_player(player)
+
+        yield event.plain_result(
+            f"♻️ 回收成功！\n"
+            f"└─ {item_name}×{count}\n"
+            f"└─ 获得灵石 +{total:,}（单价 {unit}/个，{int(RECYCLE_RATE * 100)}% 回收价）\n"
+            f"└─ 当前灵石：{player.gold:,}"
+        )
+
+    @player_required
     async def handle_search_item(self, player: Player, event: AstrMessageEvent, keyword: str):
         """搜索储物戒中的物品"""
         if not keyword or keyword.strip() == "":
@@ -465,20 +529,6 @@ class StorageRingHandler:
         lines.append(f"\n共找到 {len(matched)} 种物品")
         
         yield event.plain_result("".join(lines))
-
-    @player_required
-    async def handle_store_all(self, player: Player, event: AstrMessageEvent, category: str = None):
-        """批量存入物品（预留接口，实际物品来源需要其他系统配合）"""
-        yield event.plain_result(
-            f"📦 批量存入功能说明：\n"
-            f"当前物品会在以下情况自动存入储物戒：\n"
-            f"  · 商店购买物品\n"
-            f"  · 历练/秘境获得物品\n"
-            f"  · Boss击杀掉落\n"
-            f"  · 悬赏任务奖励\n"
-            f"  · 卸下装备\n"
-            f"\n所有物品获取后会自动存入储物戒"
-        )
 
     @player_required
     async def handle_retrieve_all(self, player: Player, event: AstrMessageEvent, category: str = None):

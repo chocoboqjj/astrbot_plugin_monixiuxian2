@@ -47,10 +47,22 @@ class BountyManager:
             "hunt": [
                 {"name": "灵兽毛皮", "weight": 40, "min": 1, "max": 3},
                 {"name": "妖兽精血", "weight": 30, "min": 1, "max": 2},
-                {"name": "玄铁", "weight": 30, "min": 1, "max": 2}
+                {"name": "精铁", "weight": 30, "min": 1, "max": 2}
             ]
         }
     }
+
+    # 悬赏进度标签 → 玩家可执行的实际指令（用于「去哪里完成」提示）
+    # 顺序即提示展示顺序；gather/collect/kill/escort 等为描述性标签，
+    # 当前版本没有独立的对应指令，统一由历练/秘境路线推进，故不单列。
+    COMPLETION_HINTS = [
+        ("adventure_scout", "历练·巡山问道", "/开始历练 巡山问道"),
+        ("adventure_roam", "历练·云游四方", "/开始历练 云游四方"),
+        ("adventure_hunt", "历练·猎魔肃清", "/开始历练 猎魔肃清"),
+        ("adventure_peril", "历练·九死一生", "/开始历练 九死一生"),
+        ("rift", "秘境探索", "/秘境列表 查看后 /探索秘境 <ID>"),
+        ("explore", "秘境探索", "/秘境列表 查看后 /探索秘境 <ID>"),
+    ]
 
     def __init__(self, db: DataBase, storage_ring_manager: Optional["StorageRingManager"] = None):
         self.db = db
@@ -106,6 +118,36 @@ class BountyManager:
             logger.info("已加载冒险路线元数据用于悬赏校准")
         except Exception as exc:
             logger.warning(f"加载冒险路线配置失败，将使用默认时限: {exc}")
+
+    # -------- 完成方式提示 --------
+
+    def _completion_command_entries(self, progress_tags) -> List[Tuple[str, str]]:
+        """根据悬赏进度标签返回可执行指令列表（去重、稳定顺序）"""
+        tags = {str(t).lower() for t in (progress_tags or [])}
+        out: List[Tuple[str, str]] = []
+        seen = set()
+        for tag, label, cmd in self.COMPLETION_HINTS:
+            if tag in tags and cmd not in seen:
+                seen.add(cmd)
+                out.append((label, cmd))
+        return out
+
+    def format_completion_hint(self, progress_tags) -> str:
+        """生成玩家接取/查看悬赏时的「去哪里完成」提示"""
+        entries = self._completion_command_entries(progress_tags)
+        if not entries:
+            return "💡 通过历练或秘境推进悬赏进度"
+        lines = ["📍 完成方式："]
+        for label, cmd in entries:
+            lines.append(f"  · {label}：{cmd}")
+        return "\n".join(lines)
+
+    def format_completion_hint_short(self, progress_tags) -> str:
+        """生成悬赏列表用的紧凑提示（仅列指令）"""
+        entries = self._completion_command_entries(progress_tags)
+        if not entries:
+            return "历练 / 秘境"
+        return "、".join(cmd for _, cmd in entries)
 
     # -------- 列表 & 缓存 --------
 
@@ -293,7 +335,8 @@ class BountyManager:
             f"任务：{template['name']}（{cached.get('difficulty_name', diff_key)}）\n"
             f"目标：完成 {cached['count']} 次\n"
             f"奖励：{cached['reward']['stone']:,} 灵石 + {cached['reward']['exp']:,} 修为\n"
-            f"时限：{time_limit // 60} 分钟"
+            f"时限：{time_limit // 60} 分钟\n"
+            f"{self.format_completion_hint(cached.get('progress_tags', []))}"
         )
 
     async def check_bounty_status(self, player: Player) -> Tuple[bool, str]:
@@ -308,6 +351,7 @@ class BountyManager:
 
         diff_name = rewards.get("difficulty_name", rewards.get("difficulty", "未知"))
         desc = rewards.get("description", "")
+        hint = self.format_completion_hint(rewards.get("progress_tags", []))
 
         return True, (
             f"📜 当前悬赏（{diff_name}）\n"
@@ -318,7 +362,8 @@ class BountyManager:
             f"奖励：{rewards.get('stone', 0):,} 灵石 + {rewards.get('exp', 0):,} 修为\n"
             f"剩余时间：{remaining // 60} 分钟\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"💡 完成后使用 /完成悬赏 领取奖励"
+            f"{hint}\n"
+            f"💡 进度满后使用 /完成悬赏 领取奖励"
         )
 
     async def complete_bounty(self, player: Player) -> Tuple[bool, str]:
@@ -341,12 +386,17 @@ class BountyManager:
             target = active.get("target_count", 1)
             if progress < target:
                 await self.db.conn.rollback()
+                try:
+                    _rw = json.loads(active["rewards"])
+                except Exception:
+                    _rw = {}
+                hint = self.format_completion_hint(_rw.get("progress_tags", []))
                 return False, (
                     f"❌ 任务尚未完成！\n"
                     f"任务：{active['bounty_name']}\n"
                     f"进度：{progress}/{target}\n"
                     f"━━━━━━━━━━━━━━━\n"
-                    f"💡 通过历练或秘境推进悬赏进度"
+                    f"{hint}"
                 )
 
             rewards = json.loads(active["rewards"])
@@ -371,11 +421,12 @@ class BountyManager:
             raise
 
         item_msg = ""
+        roll_msg = ""
         if self.storage_ring_manager:
             try:
                 rewards = json.loads(active["rewards"])
                 item_table = rewards.get("item_table") or active.get("target_type", "gather")
-                dropped_items = await self._roll_bounty_items(player, item_table)
+                dropped_items, roll_msg = await self._roll_bounty_items(player, item_table)
                 if dropped_items:
                     lines = []
                     for item_name, count in dropped_items:
@@ -391,12 +442,14 @@ class BountyManager:
 
         rewards = json.loads(active["rewards"])
         diff_name = rewards.get("difficulty_name", rewards.get("difficulty", "未知"))
+        roll_block = f"\n🎰 命数判定：{roll_msg}" if roll_msg else ""
         return True, (
             f"✅ 悬赏完成（{diff_name}）！\n"
             f"任务：{active['bounty_name']}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"获得灵石：+{rewards.get('stone', 0):,}\n"
             f"获得修为：+{rewards.get('exp', 0):,}{item_msg}"
+            f"{roll_block}"
         )
 
     async def abandon_bounty(self, player: Player) -> Tuple[bool, str]:
@@ -411,11 +464,21 @@ class BountyManager:
 
     # -------- 进度与奖励 --------
 
-    async def _roll_bounty_items(self, player: Player, table_name: str) -> List[Tuple[str, int]]:
+    async def _roll_bounty_items(
+        self, player: Player, table_name: str
+    ) -> Tuple[List[Tuple[str, int]], str]:
+        """结算悬赏的物品掉落
+
+        Returns:
+            (掉落物品列表, 概率判定说明)
+        """
+        from ..utils.probability import describe_roll
+
         dropped_items: List[Tuple[str, int]] = []
         drop_table = self.item_tables.get(table_name, self.item_tables.get("gather", []))
-        if not drop_table or random.randint(1, 100) > 70:
-            return dropped_items
+        BOUNTY_DROP_CHANCE = 70
+        if not drop_table or random.randint(1, 100) > BOUNTY_DROP_CHANCE:
+            return dropped_items, describe_roll("悬赏物品掉落", BOUNTY_DROP_CHANCE, False)
 
         total_weight = sum(item["weight"] for item in drop_table)
         roll = random.randint(1, total_weight)
@@ -429,7 +492,11 @@ class BountyManager:
 
         count = random.randint(chosen["min"], chosen["max"])
         dropped_items.append((chosen["name"], count))
-        return dropped_items
+        roll_msg = describe_roll(
+            "悬赏物品掉落", BOUNTY_DROP_CHANCE, True,
+            result_text=f"{chosen['name']} x{count}"
+        )
+        return dropped_items, roll_msg
 
     async def add_bounty_progress(self, player: Player, activity_tag: str, count: int = 1) -> Tuple[bool, str]:
         """根据活动标签推进悬赏"""

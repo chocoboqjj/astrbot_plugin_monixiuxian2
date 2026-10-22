@@ -5,7 +5,6 @@ import json
 from typing import Tuple, Optional, Dict
 from ..data import DataBase
 from ..models import Player
-from ..models_extended import UserStatus
 
 __all__ = ["DualCultivationManager"]
 
@@ -91,11 +90,7 @@ class DualCultivationManager:
         if initiator.user_id == target_id:
             return False, "❌ 不能与自己双修。"
         
-        # 检查发起者状态（状态互斥）
-        user_cd = await self.db.ext.get_user_cd(initiator.user_id)
-        if user_cd and user_cd.type != UserStatus.IDLE:
-            current_status = UserStatus.get_name(user_cd.type)
-            return False, f"❌ 你当前正{current_status}，无法发起双修！"
+        # 双修为瞬时操作，不受闭关/历练/秘境影响
         
         # 检查目标是否存在
         target = await self.db.get_player_by_id(target_id)
@@ -107,10 +102,7 @@ class DualCultivationManager:
         if exp_ratio > DUAL_CULT_MAX_EXP_RATIO:
             return False, f"❌ 双方修为差距过大（最大{DUAL_CULT_MAX_EXP_RATIO}倍），无法双修。"
         
-        # 检查目标状态
-        target_cd = await self.db.ext.get_user_cd(target_id)
-        if target_cd and target_cd.type != UserStatus.IDLE:
-            return False, "❌ 对方正忙，无法接受双修请求。"
+        # 对方的状态不影响双修（双修是双方同时进行的互动）
         
         # 检查发起者冷却
         last_dual = await self._get_last_dual_time(initiator.user_id)

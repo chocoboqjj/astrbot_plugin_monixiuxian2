@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from astrbot.api import logger, AstrBotConfig
@@ -35,6 +36,8 @@ def require_whitelist(func):
 
 # 指令定义
 CMD_HELP = "修仙帮助"
+CMD_NEWBIE = "新手引导"
+CMD_REFRESH_SHOP = "刷新商店"
 CMD_START_XIUXIAN = "我要修仙"
 CMD_PLAYER_INFO = "我的信息"
 CMD_START_CULTIVATION = "闭关"
@@ -61,6 +64,7 @@ CMD_DISCARD_ITEM = "丢弃"
 CMD_GIFT_ITEM = "赠予"
 CMD_ACCEPT_GIFT = "接收"
 CMD_REJECT_GIFT = "拒绝"
+CMD_RECYCLE_ITEM = "回收"
 CMD_SEARCH_ITEM = "搜索物品"
 CMD_RETRIEVE_ALL = "取出所有"
 
@@ -75,6 +79,9 @@ CMD_SECT_KICK = "踢出成员"
 CMD_SECT_TRANSFER = "宗主传位"
 CMD_SECT_TASK = "宗门任务"
 CMD_SECT_POSITION = "职位变更"
+CMD_SECT_UPGRADE = "宗门建设"
+CMD_SECT_ELIXIR_INFO = "宗门丹房"
+CMD_SECT_ELIXIR_CLAIM = "宗门丹药"
 
 # Boss系统指令
 CMD_BOSS_INFO = "世界Boss"
@@ -181,7 +188,7 @@ class XiuXianPlugin(Star):
         self.player_handler = PlayerHandler(self.db, self.config, self.config_manager)
         self.equipment_handler = EquipmentHandler(self.db, self.config_manager)
         self.breakthrough_handler = BreakthroughHandler(self.db, self.config_manager, self.config)
-        self.pill_handler = PillHandler(self.db, self.config_manager)
+        self.pill_handler = PillHandler(self.db, self.config_manager, self.config)
         self.shop_handler = ShopHandler(self.db, self.config, self.config_manager)
         self.storage_ring_handler = StorageRingHandler(self.db, self.config_manager)
         
@@ -191,6 +198,15 @@ class XiuXianPlugin(Star):
         
         self.combat_mgr = CombatManager()
         self.sect_mgr = SectManager(self.db, self.config_manager)
+        # 统一惩罚入口：所有「身死道消 / 数据清除」场景统一走这里
+        from .core import PenaltyManager
+        self.penalty_mgr = PenaltyManager(self.db, self.sect_mgr)
+        # 挂到 db 上，方便各 handler/manager 直接取用（避免层层透传参数）
+        self.db.penalty_mgr = self.penalty_mgr
+        # 多活动并行状态管理器（闭关 / 历练 / 秘境 可同时进行）
+        from .core import ActivityManager
+        self.activity_mgr = ActivityManager(self.db)
+        self.db.activity_mgr = self.activity_mgr
         self.boss_mgr = BossManager(self.db, self.combat_mgr, self.config_manager, self.storage_ring_mgr)
         self.rift_mgr = RiftManager(self.db, self.config_manager, self.storage_ring_mgr)
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
@@ -216,7 +232,7 @@ class XiuXianPlugin(Star):
         self.bounty_handlers = BountyHandlers(self.db, self.bounty_mgr)
         
         # Phase 3: 传承PK
-        self.impart_pk_mgr = ImpartPkManager(self.db, self.combat_mgr)
+        self.impart_pk_mgr = ImpartPkManager(self.db, self.combat_mgr, self.config_manager)
         self.impart_pk_handlers = ImpartPkHandlers(self.db, self.impart_pk_mgr)
         
         # Phase 4: 扩展功能
@@ -282,13 +298,30 @@ class XiuXianPlugin(Star):
         # 确保系统配置表存在
         await self.db.ext.ensure_system_config_table()
         
+        # 确保多活动状态表存在（闭关/历练/秘境并行）
+        await self.activity_mgr.ensure_table()
+        await self._migrate_legacy_activities()
+        
         # 启动定时任务
         self.boss_task = asyncio.create_task(self._schedule_boss_spawn())
         self.loan_check_task = asyncio.create_task(self._schedule_loan_check())
         self.spirit_eye_task = asyncio.create_task(self._schedule_spirit_eye_spawn())
         self.bounty_check_task = asyncio.create_task(self._schedule_bounty_check())
+        self.sect_daily_task = asyncio.create_task(self._schedule_sect_daily_reset())
         
         logger.info("【修仙插件】已加载。")
+
+    async def _migrate_legacy_activities(self):
+        """把旧 user_cd 单槽位状态迁移到新的多活动表（存量数据兼容）"""
+        try:
+            async with self.db.conn.execute("SELECT user_id FROM user_cd WHERE type != 0") as cur:
+                rows = await cur.fetchall()
+            for row in rows:
+                await self.activity_mgr.migrate_legacy(row[0])
+            if rows:
+                logger.info(f"【修仙插件】已迁移 {len(rows)} 条旧活动状态到多活动表")
+        except Exception as e:
+            logger.warning(f"【修仙插件】迁移旧活动状态失败: {e}")
 
     async def terminate(self):
         if self.boss_task:
@@ -299,6 +332,8 @@ class XiuXianPlugin(Star):
             self.spirit_eye_task.cancel()
         if self.bounty_check_task:
             self.bounty_check_task.cancel()
+        if getattr(self, "sect_daily_task", None):
+            self.sect_daily_task.cancel()
         await self.db.close()
         logger.info("【修仙插件】已卸载。")
         
@@ -561,6 +596,29 @@ class XiuXianPlugin(Star):
                 logger.error(f"悬赏检查任务异常: {e}")
                 await asyncio.sleep(60)
 
+    async def _schedule_sect_daily_reset(self):
+        """宗门每日重置任务（每天 0 点重置宗门丹药领取标记与任务次数）"""
+        last_reset_date = ""
+        while True:
+            try:
+                await self.db.ensure_connection()
+                await asyncio.sleep(300)  # 每 5 分钟检查一次是否跨天
+                now = datetime.now()
+                today = now.strftime("%Y-%m-%d")
+                if today != last_reset_date and now.hour == 0:
+                    await self.db.ext.reset_sect_elixir_get()
+                    await self.db.ext.reset_sect_tasks()
+                    last_reset_date = today
+                    logger.info("【修仙插件】宗门每日重置完成（丹药领取标记 + 任务次数）")
+                elif today != last_reset_date and last_reset_date == "":
+                    # 首次启动：记录当天，不追溯重置
+                    last_reset_date = today
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"宗门每日重置任务异常: {e}")
+                await asyncio.sleep(60)
+
     async def _broadcast_spirit_eye_spawn(self, msg: str):
         """广播灵眼刷新消息"""
         from astrbot.api.event import MessageChain
@@ -588,6 +646,12 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_help(self, event: AstrMessageEvent):
         async for r in self.misc_handler.handle_help(event):
+            yield r
+
+    @filter.command(CMD_NEWBIE, "新手指引，三步入门")
+    @require_whitelist
+    async def handle_newbie_guide(self, event: AstrMessageEvent):
+        async for r in self.misc_handler.handle_newbie_guide(event):
             yield r
 
     @filter.command(CMD_START_XIUXIAN, "开始你的修仙之路")
@@ -704,6 +768,12 @@ class XiuXianPlugin(Star):
         async for r in self.shop_handler.handle_buy(event, item_name):
             yield r
 
+    @filter.command(CMD_REFRESH_SHOP, "手动刷新商店货架（商店管理员）")
+    @require_whitelist
+    async def handle_refresh_shop(self, event: AstrMessageEvent):
+        async for r in self.shop_handler.handle_refresh_shop(event):
+            yield r
+
     @filter.command(CMD_STORAGE_RING, "查看储物戒信息")
     @require_whitelist
     async def handle_storage_ring(self, event: AstrMessageEvent):
@@ -764,6 +834,12 @@ class XiuXianPlugin(Star):
         async for r in self.storage_ring_handler.handle_retrieve_all(event, category):
             yield r
 
+    @filter.command(CMD_RECYCLE_ITEM, "回收物品换取灵石")
+    @require_whitelist
+    async def handle_recycle_item(self, event: AstrMessageEvent, args: str = ""):
+        async for r in self.storage_ring_handler.handle_recycle_item(event, args):
+            yield r
+
     # ===== 宗门系统指令 =====
 
     @filter.command(CMD_CREATE_SECT, "创建宗门")
@@ -800,6 +876,24 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_sect_task(self, event: AstrMessageEvent):
         async for r in self.sect_handlers.handle_sect_task(event):
+            yield r
+
+    @filter.command(CMD_SECT_UPGRADE, "宗门建设（升级丹房，宗主/长老）")
+    @require_whitelist
+    async def handle_sect_upgrade(self, event: AstrMessageEvent):
+        async for r in self.sect_handlers.handle_sect_upgrade(event):
+            yield r
+
+    @filter.command(CMD_SECT_ELIXIR_INFO, "查看宗门丹房建设状态")
+    @require_whitelist
+    async def handle_sect_elixir_info(self, event: AstrMessageEvent):
+        async for r in self.sect_handlers.handle_sect_elixir_info(event):
+            yield r
+
+    @filter.command(CMD_SECT_ELIXIR_CLAIM, "领取宗门每日丹药")
+    @require_whitelist
+    async def handle_sect_elixir_claim(self, event: AstrMessageEvent):
+        async for r in self.sect_handlers.handle_sect_elixir_claim(event):
             yield r
 
     @filter.command(CMD_SECT_LIST, "查看宗门列表")

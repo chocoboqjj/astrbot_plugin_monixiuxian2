@@ -5,8 +5,11 @@
 """
 
 import random
-from typing import Tuple, Dict, Optional, List
+from typing import Tuple, Dict, Optional, List, TYPE_CHECKING
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from ..models import Player
 
 @dataclass
 class CombatStats:
@@ -47,6 +50,71 @@ class CombatManager:
         
         return hp, mp
     
+    @classmethod
+    def calculate_combat_stats(
+        cls,
+        player: "Player",
+        impart_info=None,
+        equipment_atk: int = 0,
+        equipment_defense: int = 0,
+    ) -> "CombatStats":
+        """根据玩家修为、传承加成与装备加成构建战斗属性。
+
+        这是战斗属性计算的唯一权威入口，供决斗 / 传承挑战 / Boss 战等统一调用，
+        避免各模块重复实现导致数值不一致（例如此前传承挑战直接调用一个不存在的方法）。
+
+        Args:
+            player: 玩家对象
+            impart_info: 传承加成信息（可为 None）
+            equipment_atk: 装备提供的攻击加成
+            equipment_defense: 装备提供的防御加成
+
+        Returns:
+            CombatStats 战斗属性
+        """
+        hp_buff = impart_info.impart_hp_per if impart_info else 0.0
+        mp_buff = impart_info.impart_mp_per if impart_info else 0.0
+        atk_buff = impart_info.impart_atk_per if impart_info else 0.0
+
+        hp, mp = cls.calculate_hp_mp(player.experience, hp_buff, mp_buff)
+        base_atk = cls.calculate_atk(player.experience, player.atkpractice, atk_buff)
+        final_atk = base_atk + equipment_atk
+
+        return CombatStats(
+            user_id=player.user_id,
+            name=player.user_name if player.user_name else f"道友{player.user_id}",
+            hp=hp,
+            max_hp=hp,
+            mp=mp,
+            max_mp=mp,
+            atk=final_atk,
+            defense=equipment_defense,
+            exp=player.experience,
+        )
+
+    @staticmethod
+    def calculate_equipment_bonus(config_manager, player) -> Dict[str, int]:
+        """计算装备提供的攻防加成（武器加攻击，防具加防御）。
+
+        同时供决斗与传承挑战复用，避免逻辑分散。
+        """
+        bonus: Dict[str, int] = {"atk": 0, "defense": 0}
+        if not config_manager:
+            return bonus
+
+        if player.weapon and player.weapon in config_manager.weapons_data:
+            data = config_manager.weapons_data[player.weapon]
+            bonus["atk"] += data.get("atk", 0)
+            bonus["atk"] += data.get("physical_damage", 0)
+            bonus["atk"] += data.get("magic_damage", 0)
+
+        if player.armor and player.armor in config_manager.items_data:
+            data = config_manager.items_data[player.armor]
+            bonus["defense"] += data.get("physical_defense", 0)
+            bonus["defense"] += data.get("magic_defense", 0)
+
+        return bonus
+
     @staticmethod
     def calculate_atk(experience: int, atkpractice: int = 0, atk_buff: float = 0.0) -> int:
         """
@@ -93,6 +161,36 @@ class CombatManager:
         
         return is_crit, damage
     
+    @staticmethod
+    def calculate_combat_power(
+        physical_damage: int,
+        magic_damage: int,
+        physical_defense: int,
+        magic_defense: int,
+        mental_power: int,
+        hp: int = 0,
+        crit_rate: int = 0,
+    ) -> int:
+        """统一的战力计算公式（玩家面板与排行榜共用，避免数值不一致）。
+
+        构成：
+          - 攻防主体：物伤 + 法伤 + (物防 + 法防) * 0.8
+          - 精神力：每 5 点贡献 1 战力（兼作“敏捷/速度”维度）
+          - 暴击：每 1% 暴击率贡献 2 战力
+          - 生存：HP 封顶 10 万后每 100 点贡献 1 战力（防止高修为 HP 淹没攻防）
+
+        Args:
+            physical_damage / magic_damage: 物伤 / 法伤
+            physical_defense / magic_defense: 物防 / 法防
+            mental_power: 精神力
+            hp: 当前/估算气血（可选）
+            crit_rate: 暴击率百分比（可选）
+        """
+        offense = int(physical_damage) + int(magic_damage)
+        defense = (int(physical_defense) + int(magic_defense)) * 0.8
+        hp_contrib = min(int(hp), 100000) // 100
+        return int(offense + defense + int(mental_power) // 5 + int(crit_rate) * 2 + hp_contrib)
+
     @staticmethod
     def apply_damage_reduction(damage: int, defense: int = 0) -> int:
         """

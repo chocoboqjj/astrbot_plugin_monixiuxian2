@@ -15,10 +15,14 @@ PLAYER_FIELDS = {f.name for f in fields(Player)}
 class DataBase:
     """数据库管理类，提供基础玩家操作"""
 
-    def __init__(self, db_file: str = "xiuxian_data_lite.db"):
+    def __init__(self, db_file: str = "xiuxian_data_v2.db"):
         self.db_path = Path(db_file)
         self.conn: aiosqlite.Connection = None
         self.ext: Optional[DatabaseExtended] = None  # 扩展操作类
+        # 统一惩罚入口（由 main.py 注入），供各处直接访问，避免层层透传
+        self.penalty_mgr = None
+        # 多活动并行状态管理器（由 main.py 注入）
+        self.activity_mgr = None
 
     async def connect(self):
         """连接数据库"""
@@ -122,6 +126,26 @@ class DataBase:
         )
         await self.conn.commit()
 
+        # 初始化关联表（传承 / buff / 冷却）
+        # 缺了这一步，新玩家的 impart_info 永远为空 → /传承信息 恒返回
+        # "你还未开启传承系统"，且战斗属性拿不到任何传承加成。
+        await self._init_player_related_tables(player.user_id)
+
+    async def _init_player_related_tables(self, user_id: str):
+        """为新玩家初始化传承、buff、冷却三张关联表（幂等）"""
+        try:
+            await self.ext.create_impart_info(user_id)
+        except Exception as e:
+            logger.warning(f"[create_player] 初始化 impart_info 失败: {e}")
+        try:
+            await self.ext.create_buff_info(user_id)
+        except Exception as e:
+            logger.warning(f"[create_player] 初始化 buff_info 失败: {e}")
+        try:
+            await self.ext.set_user_free(user_id)
+        except Exception as e:
+            logger.warning(f"[create_player] 初始化 user_cd 失败: {e}")
+
     async def get_player_by_id(self, user_id: str) -> Player:
         """根据用户ID获取玩家信息"""
         async with self.conn.execute(
@@ -147,8 +171,13 @@ class DataBase:
                 return Player(**filtered_data)
             return None
 
-    async def update_player(self, player: Player):
-        """更新玩家信息"""
+    async def update_player(self, player: Player, commit: bool = True):
+        """更新玩家信息
+
+        Args:
+            commit: 是否在更新后立即提交事务。外部已开启事务时应传 False，
+                    由外层统一提交/回滚，避免内层提交提前落库导致外层 rollback 失效。
+        """
         await self.conn.execute(
             """
             UPDATE players SET
@@ -246,7 +275,8 @@ class DataBase:
                 player.user_id
             )
         )
-        await self.conn.commit()
+        if commit:
+            await self.conn.commit()
 
     async def delete_player(self, user_id: str):
         """删除玩家"""
@@ -275,10 +305,16 @@ class DataBase:
             ("DELETE FROM dual_cultivation WHERE user_id = ?", (user_id,)),
             ("DELETE FROM dual_cultivation_requests WHERE from_id = ? OR target_id = ?", (user_id, user_id)),
             ("DELETE FROM user_cd WHERE user_id = ?", (user_id,)),
+            # 多活动状态（v3.1.8 新增表，旧库可能不存在，safe_execute 会容错）
+            ("DELETE FROM user_activity WHERE user_id = ?", (user_id,)),
             ("DELETE FROM buff_info WHERE user_id = ?", (user_id,)),
             ("DELETE FROM impart_info WHERE user_id = ?", (user_id,)),
-            ("DELETE FROM combat_cooldowns WHERE attacker_id = ? OR defender_id = ?", (user_id, user_id)),
+            ("DELETE FROM combat_cooldowns WHERE user_id = ?", (user_id,)),
             ("DELETE FROM pending_gifts WHERE sender_id = ? OR receiver_id = ?", (user_id, user_id)),
+            # 解散被删除玩家拥有的宗门，并释放其成员（避免孤儿宗门 / 成员 sect_id 悬空）
+            ("UPDATE players SET sect_id = 0, sect_position = 4, sect_contribution = 0 "
+             "WHERE sect_id IN (SELECT sect_id FROM sects WHERE sect_owner = ?)", (user_id,)),
+            ("DELETE FROM sects WHERE sect_owner = ?", (user_id,)),
         ]
 
         for sql, params in statements:

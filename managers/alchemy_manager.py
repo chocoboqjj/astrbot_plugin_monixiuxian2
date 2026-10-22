@@ -7,7 +7,6 @@ import random
 from typing import Tuple, List, Dict, Optional, TYPE_CHECKING
 from ..data.data_manager import DataBase
 from ..models import Player
-from ..models_extended import UserStatus
 
 if TYPE_CHECKING:
     from ..config_manager import ConfigManager
@@ -167,11 +166,7 @@ class AlchemyManager:
         if not player:
             return False, "❌ 你还未踏入修仙之路！", None
         
-        # 2. 检查用户状态（状态互斥）
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if user_cd and user_cd.type != UserStatus.IDLE:
-            current_status = UserStatus.get_name(user_cd.type)
-            return False, f"❌ 你当前正{current_status}，无法炼丹！", None
+        # 2. 炼丹为瞬时操作，不受闭关/历练/秘境影响
         
         # 3. 检查配方
         if pill_id not in self.recipes:

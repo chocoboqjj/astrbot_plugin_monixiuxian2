@@ -1,13 +1,11 @@
 # handlers/combat_handlers.py
-import re
 import time
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.all import *
 from ..managers.combat_manager import CombatManager, CombatStats
 from ..data.data_manager import DataBase
-from .utils import player_required
+from .utils import player_required, extract_target_id
 from ..models import Player
-from ..models_extended import UserStatus
 
 # 战斗冷却配置（秒）
 DUEL_COOLDOWN = 300  # 决斗冷却5分钟
@@ -62,32 +60,8 @@ class CombatHandlers:
             logger.warning(f"更新战斗冷却失败: {e}")
 
     async def _get_target_id(self, event: AstrMessageEvent, arg: str) -> str:
-        message_chain = []
-        if hasattr(event, "message_obj") and event.message_obj:
-            message_chain = getattr(event.message_obj, "message", []) or []
-
-        for component in message_chain:
-            if isinstance(component, At):
-                candidate = None
-                for attr in ("qq", "target", "uin", "user_id"):
-                    candidate = getattr(component, attr, None)
-                    if candidate:
-                        break
-                if candidate:
-                    return str(candidate).lstrip("@")
-
-        if arg:
-            cleaned = arg.strip().lstrip("@")
-            if cleaned.isdigit():
-                return cleaned
-
-        message_text = ""
-        if hasattr(event, "get_message_str"):
-            message_text = event.get_message_str() or ""
-        match = re.search(r'(\d{5,})', message_text)
-        if match:
-            return match.group(1)
-        return None
+        """解析目标用户ID（兼容 OneBot 与 QQ 官方机器人）。"""
+        return extract_target_id(event, arg)
 
     def _calculate_equipment_bonus(self, player) -> dict:
         """计算装备提供的属性加成"""
@@ -161,19 +135,7 @@ class CombatHandlers:
             yield event.plain_result("❌ 不能和自己决斗")
             return
 
-        # 检查发起者状态
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if user_cd and user_cd.type != UserStatus.IDLE:
-            current_status = UserStatus.get_name(user_cd.type)
-            yield event.plain_result(f"❌ 你当前正在{current_status}，无法进行战斗！")
-            return
-        
-        # 检查目标状态
-        target_cd = await self.db.ext.get_user_cd(target_id)
-        if target_cd and target_cd.type != UserStatus.IDLE:
-            target_status = UserStatus.get_name(target_cd.type)
-            yield event.plain_result(f"❌ 对方当前正在{target_status}，无法进行战斗！")
-            return
+        # 决斗/切磋为瞬时操作，双方都不受闭关/历练/秘境影响
 
         # 检查冷却
         now = int(time.time())
@@ -222,19 +184,7 @@ class CombatHandlers:
             yield event.plain_result("❌ 不能和自己切磋")
             return
 
-        # 检查发起者状态
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if user_cd and user_cd.type != UserStatus.IDLE:
-            current_status = UserStatus.get_name(user_cd.type)
-            yield event.plain_result(f"❌ 你当前正在{current_status}，无法进行战斗！")
-            return
-        
-        # 检查目标状态
-        target_cd = await self.db.ext.get_user_cd(target_id)
-        if target_cd and target_cd.type != UserStatus.IDLE:
-            target_status = UserStatus.get_name(target_cd.type)
-            yield event.plain_result(f"❌ 对方当前正在{target_status}，无法进行战斗！")
-            return
+        # 决斗/切磋为瞬时操作，双方都不受闭关/历练/秘境影响
 
         # 检查冷却
         now = int(time.time())

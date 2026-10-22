@@ -8,7 +8,8 @@ import random
 import time
 from typing import Tuple, Dict, Optional, List, TYPE_CHECKING
 from ..data.data_manager import DataBase
-from ..models_extended import Boss, UserStatus
+from ..models_extended import Boss
+
 from ..models import Player
 from .combat_manager import CombatManager, CombatStats
 
@@ -43,7 +44,7 @@ class BossManager:
         "low": [  # 低级Boss (练气-金丹)
             {"name": "灵兽内丹", "weight": 40, "min": 1, "max": 2},
             {"name": "妖兽精血", "weight": 30, "min": 1, "max": 3},
-            {"name": "玄铁", "weight": 30, "min": 3, "max": 6},
+            {"name": "精铁", "weight": 30, "min": 3, "max": 6},
         ],
         "mid": [  # 中级Boss (元婴-化神)
             {"name": "灵兽内丹", "weight": 30, "min": 2, "max": 4},
@@ -63,6 +64,7 @@ class BossManager:
     def __init__(self, db: DataBase, combat_mgr: CombatManager, config_manager=None, storage_ring_manager: "StorageRingManager" = None):
         self.db = db
         self.combat_mgr = combat_mgr
+        self.config_manager = config_manager
         self.storage_ring_manager = storage_ring_manager
         self.config = config_manager.boss_config if config_manager else {}
         self.levels = self.config.get("levels", self.BOSS_LEVELS)
@@ -168,51 +170,38 @@ ATK：{atk}
         if not boss:
             return False, "❌ 当前没有Boss！", None
         
-        # 3. 检查玩家状态
-        user_cd = await self.db.ext.get_user_cd(user_id)
-        if not user_cd:
-            await self.db.ext.create_user_cd(user_id)
-            user_cd = await self.db.ext.get_user_cd(user_id)
-        
-        if user_cd.type != UserStatus.IDLE:
-            return False, "❌ 你当前正忙，无法挑战Boss！", None
-        
-        # 4. 计算玩家战斗属性
-        # 获取buff加成
+        # 3. 挑战 Boss 为瞬时操作，不受闭关/历练/秘境影响
+
+        # 3.5 境界门槛：避免低境界玩家挑战远超自身的 Boss（既送死又无收益）
+        boss_level_index = 0
+        for lvl in self.levels:
+            if lvl["name"] == boss.boss_level:
+                boss_level_index = lvl["level_index"]
+                break
+        if boss_level_index and (boss_level_index - player.level_index) > 6:
+            return False, (
+                f"❌ 你的境界远低于 Boss『{boss.boss_name}』（{boss.boss_level}境），暂无法挑战！\n"
+                f"💡 先提升境界再来吧。"
+            ), None
+
+        # 4. 计算玩家战斗属性（每次挑战都重新计算，使用最新修为/传承/装备，避免陈旧属性）
         impart_info = await self.db.ext.get_impart_info(user_id)
         hp_buff = impart_info.impart_hp_per if impart_info else 0.0
         mp_buff = impart_info.impart_mp_per if impart_info else 0.0
         atk_buff = impart_info.impart_atk_per if impart_info else 0.0
         crit_rate_buff = impart_info.impart_know_per if impart_info else 0.0
-        
-        # 计算HP/MP/ATK
-        if player.hp == 0 or player.mp == 0:
-            # 如果没有初始化战斗属性，先计算
-            hp, mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
-            atk = self.combat_mgr.calculate_atk(player.experience, player.atkpractice, atk_buff)
-            player.hp = hp
-            player.mp = mp
-            player.atk = atk
-            await self.db.update_player(player)
-        else:
-            # 使用现有属性
-            hp = player.hp
-            mp = player.mp
-            atk = player.atk
-        
-        # 创建玩家战斗属性
-        player_stats = CombatStats(
-            user_id=user_id,
-            name=player.user_name if player.user_name else f"道友{user_id[:6]}",
-            hp=hp,
-            max_hp=int(player.experience * (1 + hp_buff) // 2),
-            mp=mp,
-            max_mp=int(player.experience * (1 + mp_buff)),
-            atk=atk,
-            defense=0,  # 可以根据装备添加
-            crit_rate=int(crit_rate_buff * 100),  # 转换为百分比
-            exp=player.experience
+
+        equip = CombatManager.calculate_equipment_bonus(self.config_manager, player)
+        player_stats = CombatManager.calculate_combat_stats(
+            player, impart_info, equip["atk"], equip["defense"]
         )
+        player_stats.crit_rate = int(crit_rate_buff * 100)  # 转换为百分比
+
+        # 将刷新后的属性写回玩家，保证结算一致（修复此前沿用旧 HP/ATK 的问题）
+        player.hp = player_stats.hp
+        player.mp = player_stats.mp
+        player.atk = player_stats.atk
+        await self.db.update_player(player)
         
         # 创建Boss战斗属性
         boss_stats = CombatStats(
@@ -245,9 +234,11 @@ ATK：{atk}
             
             # 物品掉落
             item_msg = ""
+            roll_msg = ""
             dropped_items = []
             if self.storage_ring_manager:
                 dropped_items = await self._roll_boss_drops(player, boss)
+                roll_msg = self._get_boss_roll_msg()
                 if dropped_items:
                     item_lines = []
                     for item_name, count in dropped_items:
@@ -259,6 +250,7 @@ ATK：{atk}
                     if item_lines:
                         item_msg = "\n\n📦 获得物品：\n" + "\n".join(item_lines)
             
+            roll_block = f"\n🎰 命数判定：\n{roll_msg}" if roll_msg else ""
             result_msg = f"""
 🎉 挑战成功！
 ━━━━━━━━━━━━━━━
@@ -266,7 +258,7 @@ ATK：{atk}
 你成功击败了『{boss.boss_name}』！
 
 战斗回合数：{battle_result['rounds']}
-获得灵石：{reward}{item_msg}
+获得灵石：{reward}{item_msg}{roll_block}
 
 {player_stats.name}
 HP：{battle_result['player_final_hp']}/{player_stats.max_hp}
@@ -414,7 +406,7 @@ ATK：{boss.atk}
                 dropped_items.append((item["name"], count))
                 break
         
-        # 高级Boss有70%概率额外掉落
+        # 高级Boss有额外掉落概率
         if boss_level_index >= 9:  # 元婴及以上
             extra_chance = 50 if boss_level_index < 15 else 70
             if random.randint(1, 100) <= extra_chance:
@@ -426,5 +418,27 @@ ATK：{boss.atk}
                         count = random.randint(item["min"], item["max"])
                         dropped_items.append((item["name"], count))
                         break
+                self._last_extra_chance = extra_chance
+                self._last_extra_hit = True
+            else:
+                self._last_extra_chance = extra_chance
+                self._last_extra_hit = False
+        else:
+            self._last_extra_chance = 0
+            self._last_extra_hit = False
         
         return dropped_items
+
+    def _get_boss_roll_msg(self) -> str:
+        """生成 Boss 掉落概率判定说明"""
+        from ..utils.probability import describe_roll
+
+        lines = [describe_roll("必落物品", 100, True)]
+        extra_chance = getattr(self, "_last_extra_chance", 0)
+        if extra_chance:
+            lines.append(
+                describe_roll(
+                    "额外掉落", extra_chance, getattr(self, "_last_extra_hit", False)
+                )
+            )
+        return "\n".join(lines)
