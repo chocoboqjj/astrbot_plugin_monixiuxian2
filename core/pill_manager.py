@@ -33,6 +33,17 @@ class PillManager:
         "max_blood_qi_gain_percent": ("max_blood_qi", "max_blood_qi_gain"),
     }
 
+    # 永久属性丹药的每境界增益上限比例（默认 30%）
+    DEFAULT_BASE_LIMIT_RATIO = 0.3
+
+    # 「基础属性上限提升」的存放键。
+    # ⚠️ 必须放在 permanent_pill_gains 的**顶层**（与 level_X 分桶平级），
+    # 因为它是对「上限本身」的全局倍率提升，不属于任何单一境界的增益分桶。
+    BASE_LIMIT_KEY = "_base_attribute_limit_bonus"
+
+    # 全局上限倍率的封顶（防止多颗洗髓丹把 30% 叠成不合理的数值）
+    MAX_BASE_LIMIT_BONUS = 2.0
+
     def __init__(self, db: DataBase, config_manager: ConfigManager, plugin_config=None):
         self.db = db
         self.config_manager = config_manager
@@ -370,6 +381,23 @@ class PillManager:
             f"━━━━━━━━━━━━━━━"
         )
 
+    def _get_base_limit_ratio(self, permanent_gains: dict) -> float:
+        """获取当前生效的「每境界永久增益上限比例」
+
+        默认 30%（DEFAULT_BASE_LIMIT_RATIO）。洗髓丹/易筋丹的
+        `base_attribute_limit_increase` 会以**倍率**形式提升该上限：
+        例如洗髓丹 +0.05 表示上限从 30% 提升到 30% × 1.05。
+
+        该加成存放在 permanent_pill_gains 顶层（BASE_LIMIT_KEY），
+        因为它是对「上限」本身的全局提升，与具体境界分桶无关。
+        """
+        try:
+            bonus = float(permanent_gains.get(self.BASE_LIMIT_KEY, 0) or 0)
+        except (TypeError, ValueError):
+            bonus = 0.0
+        bonus = max(0.0, min(bonus, self.MAX_BASE_LIMIT_BONUS))
+        return self.DEFAULT_BASE_LIMIT_RATIO * (1.0 + bonus)
+
     async def _use_permanent_pill(self, player: Player, pill_name: str, pill_data: dict) -> Tuple[bool, str]:
         """使用永久属性丹药"""
         # 检查境界限制（30%上限）
@@ -390,6 +418,9 @@ class PillManager:
 
         # 计算基础属性（当前境界突破时获得的属性）
         base_attrs = self._get_base_attributes_for_level(player, player.level_index)
+
+        # 当前生效的上限比例（洗髓丹/易筋丹可提升）
+        limit_ratio = self._get_base_limit_ratio(permanent_gains)
 
         # 检查各项属性是否已达上限
         attr_mapping = {
@@ -421,11 +452,11 @@ class PillManager:
             if gain == 0:
                 continue
 
-            # 只有正向增益才受30%限制
+            # 只有正向增益才受上限限制
             if gain > 0:
                 current_gain = permanent_gains[level_key].get(attr_key, 0)
                 base_value = base_attrs.get(attr_key, 100)  # 默认基础值100
-                limit = base_value * 0.3  # 30%上限
+                limit = base_value * limit_ratio  # 每境界上限（默认 30%，可被洗髓丹提升）
 
                 if current_gain >= limit:
                     gains_blocked[attr_name] = f"已达上限({limit:.0f})"
@@ -466,6 +497,27 @@ class PillManager:
             permanent_gains[level_key]["death_protection_multiplier"] *= death_mult
             gains_applied["突破死亡概率"] = f"降低{(1 - death_mult) * 100:.0f}%"
 
+        # 处理「基础属性上限提升」（洗髓丹 / 易筋丹）
+        # ⚠️ 这类丹药本身不提供任何属性增益，只提升「每境界永久增益的上限比例」，
+        # 因此必须走独立分支：否则会被下面的 `if not gains_applied` 判定为
+        # 「所有属性增益都已达到上限」而永远无法使用（此前即为此问题）。
+        if "base_attribute_limit_increase" in pill_data:
+            try:
+                inc = float(pill_data.get("base_attribute_limit_increase") or 0)
+            except (TypeError, ValueError):
+                inc = 0.0
+            if inc > 0:
+                cur_bonus = float(permanent_gains.get(self.BASE_LIMIT_KEY, 0) or 0)
+                new_bonus = min(cur_bonus + inc, self.MAX_BASE_LIMIT_BONUS)
+                if new_bonus <= cur_bonus:
+                    gains_blocked["基础属性上限"] = "已达上限"
+                else:
+                    permanent_gains[self.BASE_LIMIT_KEY] = new_bonus
+                    new_ratio = self.DEFAULT_BASE_LIMIT_RATIO * (1.0 + new_bonus)
+                    gains_applied["基础属性上限"] = (
+                        f"{self.DEFAULT_BASE_LIMIT_RATIO:.0%} → {new_ratio:.1%}"
+                    )
+
         if not gains_applied:
             return False, "该丹药的所有属性增益都已达到上限，无法使用！"
 
@@ -502,7 +554,11 @@ class PillManager:
                 msg_parts.append(f"  {attr_name} {reason}")
 
         msg_parts.append("━━━━━━━━━━━━━━━")
-        msg_parts.append("注：每个境界的永久属性丹药\n增益最多为基础属性的30%")
+        # 上限比例取「本次服用后」的实际值：洗髓丹/易筋丹会提升它
+        msg_parts.append(
+            f"注：每个境界的永久属性丹药\n"
+            f"增益最多为基础属性的{limit_ratio:.0%}"
+        )
 
         return True, "\n".join(msg_parts)
 
@@ -614,7 +670,21 @@ class PillManager:
         return resolved
 
     def _get_base_attributes_for_level(self, player: Player, level_index: int) -> dict:
-        """获取当前境界的基础属性（用于计算30%上限）
+        """获取当前境界的基础属性（用于计算每境界永久增益上限）
+
+        上限公式：`limit = 基础属性 × 上限比例`（比例默认 30%，可被洗髓丹提升）。
+        「基础属性」= 该境界突破时各项属性的成长量。
+
+        ⚠️ 两张境界表各自只带本系字段，导致跨系基准缺失、曾经回退到硬编码默认 100：
+          - `level_config.json`（灵修）没有 `breakthrough_blood_qi_gain`
+          - `body_level_config.json`（体修）没有 `breakthrough_spiritual_qi_gain`
+          ⇒ 跨系那一路的上限只有 100×30% = 30 点，回元丹承诺的「+5% 气血/灵气」
+            实际只给 +30（缩水约 98.5%）。
+          - `body_level_config.json`（体修）的 `breakthrough_magic_damage_gain` 恒为 0
+            ⇒ 体修法伤的上限为 0，宗门洗髓丹的法伤增益被完全阻断。
+
+        下面按「本系主属性成长量」与「玩家当前属性值」做兜底，
+        **不修改任何境界表配置**，因此突破收益完全不受影响。
 
         Args:
             player: 玩家对象，用于确定修炼类型
@@ -635,15 +705,45 @@ class PillManager:
         else:
             level_config = {}
 
+        def _growth(key: str, default: int) -> int:
+            """读取突破成长量；配置缺失时返回 0（区别于「显式为 0」）"""
+            value = level_config.get(key)
+            if value is None:
+                return 0
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+
+        spirit_growth = _growth("breakthrough_spiritual_qi_gain", 0)
+        blood_growth = _growth("breakthrough_blood_qi_gain", 0)
+        magic_damage_growth = _growth("breakthrough_magic_damage_gain", 0)
+
+        # 跨系能量基准：本系若没有对方能量字段，则以本系主能量成长量作为基准
+        # （灵修无 blood_qi 字段 → 用灵气成长量；体修无 spiritual_qi 字段 → 用气血成长量）
+        max_spiritual_qi_base = spirit_growth or blood_growth
+        max_blood_qi_base = blood_growth or spirit_growth
+
+        # 某属性在本系「不随境界成长」时（成长量为 0 且已过境界 0），
+        # 以玩家当前属性值作为上限基准，避免该属性的丹药增益被完全阻断。
+        # 境界 0 保持基准为 0：此时突破成长量全为 0，永久丹药本就无额度可分配。
+        def _fallback_to_current(attr_key: str, growth: int) -> int:
+            if growth > 0 or level_index <= 0:
+                return growth
+            try:
+                return int(getattr(player, attr_key, 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+
         return {
-            "physical_damage": level_config.get("breakthrough_physical_damage_gain", 10),
-            "magic_damage": level_config.get("breakthrough_magic_damage_gain", 10),
-            "physical_defense": level_config.get("breakthrough_physical_defense_gain", 5),
-            "magic_defense": level_config.get("breakthrough_magic_defense_gain", 5),
-            "mental_power": level_config.get("breakthrough_mental_power_gain", 100),
-            "lifespan": level_config.get("breakthrough_lifespan_gain", 100),
-            "max_spiritual_qi": level_config.get("breakthrough_spiritual_qi_gain", 100),
-            "max_blood_qi": level_config.get("breakthrough_blood_qi_gain", 100),
+            "physical_damage": _growth("breakthrough_physical_damage_gain", 10),
+            "magic_damage": _fallback_to_current("magic_damage", magic_damage_growth),
+            "physical_defense": _growth("breakthrough_physical_defense_gain", 5),
+            "magic_defense": _growth("breakthrough_magic_defense_gain", 5),
+            "mental_power": _growth("breakthrough_mental_power_gain", 100),
+            "lifespan": _growth("breakthrough_lifespan_gain", 100),
+            "max_spiritual_qi": max_spiritual_qi_base,
+            "max_blood_qi": max_blood_qi_base,
         }
 
     async def handle_resurrection(self, player: Player) -> bool:
@@ -769,6 +869,9 @@ class PillManager:
         permanent_multiplier = 1.0
         permanent_gains = player.get_permanent_pill_gains()
         for level_gain in permanent_gains.values():
+            # ⚠️ 顶层可能存在标量键（如 BASE_LIMIT_KEY 存 float），需跳过
+            if not isinstance(level_gain, dict):
+                continue
             permanent_multiplier *= level_gain.get("death_protection_multiplier", 1.0)
 
         return {
@@ -895,7 +998,11 @@ class PillManager:
         ]
 
         changed = False
-        for gain in permanent_gains.values():
+        for gain_key, gain in permanent_gains.items():
+            # ⚠️ 顶层可能存在非分桶的标量键（如 BASE_LIMIT_KEY 存的是 float），
+            # 这里只处理 dict 类型的境界分桶，避免对 float 调用 .get() 抛异常。
+            if not isinstance(gain, dict):
+                continue
             for attr_key in attr_keys:
                 value = gain.get(attr_key, 0)
                 if value:
@@ -908,5 +1015,7 @@ class PillManager:
             if "death_protection_multiplier" in gain:
                 gain["death_protection_multiplier"] = 1.0
 
+        # set_permanent_pill_gains({}) 会一并清掉基础属性上限提升，
+        # 这符合「重置所有永久属性丹药效果」的语义（洗髓丹/易筋丹也属永久丹药）。
         player.set_permanent_pill_gains({})
         return changed

@@ -1,5 +1,7 @@
 {
   "spawn_interval": 3600,
+  "max_challenges": 1,
+  "challenge_cooldown": 600,
   "levels": [
     {
       "name": "练气",

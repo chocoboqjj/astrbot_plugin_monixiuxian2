@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from astrbot.api import logger
-from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG
+from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG, CALAMITY_CONFIG
 
 class ConfigManager:
     """配置管理器，加载境界、物品、武器和丹药配置"""
@@ -24,6 +24,8 @@ class ConfigManager:
         self.boss_config: Dict[str, Any] = {}
         self.rift_config: Dict[str, Any] = {}
         self.alchemy_config: Dict[str, Any] = {}
+        # v3.2.9：天灾人祸配置
+        self.calamity_config: Dict[str, Any] = {}
         
         self._load_all()
 
@@ -80,7 +82,23 @@ class ConfigManager:
                 data = json.load(f)
 
                 if isinstance(data, list):
-                    items_dict = {item.get("name", ""): item for item in data if isinstance(item, dict) and item.get("name")}
+                    items_dict = {}
+                    for item in data:
+                        if not isinstance(item, dict):
+                            continue
+                        name = item.get("name", "")
+                        if not name:
+                            continue
+                        # ⚠️ 同名物品会被后者静默覆盖（key 就是名称），
+                        # 曾导致 util_128「混元血容丹」被 util_142 顶掉、便宜档彻底不可达。
+                        # 这里显式告警，避免同类问题再次静默发生。
+                        if name in items_dict:
+                            logger.warning(
+                                f"配置文件 {file_path.name} 中存在重名物品【{name}】："
+                                f"id={items_dict[name].get('id')} 将被 id={item.get('id')} 覆盖，"
+                                f"请为两者分配不同名称。"
+                            )
+                        items_dict[name] = item
                 elif isinstance(data, dict):
                     items_dict = {}
                     for item_id, item_data in data.items():
@@ -117,6 +135,8 @@ class ConfigManager:
         self.boss_config = self._load_config_with_default(config_dir / "boss_config.json", BOSS_CONFIG)
         self.rift_config = self._load_config_with_default(config_dir / "rift_config.json", RIFT_CONFIG)
         self.alchemy_config = self._load_config_with_default(config_dir / "alchemy_config.json", ALCHEMY_CONFIG)
+        # v3.2.9：天灾人祸配置
+        self.calamity_config = self._load_config_with_default(config_dir / "calamity_config.json", CALAMITY_CONFIG)
         self.alchemy_recipes = self._load_items_data(config_dir / "alchemy_recipes.json")
         
         # 加载游戏配置（包含各系统的硬编码参数）

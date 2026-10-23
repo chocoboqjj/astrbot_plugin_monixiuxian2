@@ -1688,8 +1688,8 @@
     },
     {
         "id": "util_128",
-        "name": "混元血容丹",
-        "description": "永久增加最大气血+10000（体修专用）",
+        "name": "百炼血容丹",
+        "description": "永久增加最大气血+10000（体修专用，百炼成血）",
         "rank": "皇品",
         "subtype": "permanent_attribute",
         "required_level_index": 16,

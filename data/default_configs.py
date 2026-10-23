@@ -15,6 +15,10 @@ SECT_CONFIG = {
 
 BOSS_CONFIG = {
     "spawn_interval": 3600,
+    # v3.2.8：每只 Boss 每个玩家最多可挑战次数（0 = 不限制）；Boss 刷新后自动重置
+    "max_challenges": 1,
+    # v3.2.8：两次挑战之间的冷却秒数（0 = 不限制）
+    "challenge_cooldown": 600,
     "levels": [
         {"name": "练气", "level_index": 0, "hp_mult": 1.0, "atk_mult": 1.0, "reward_mult": 1.0},
         {"name": "筑基", "level_index": 3, "hp_mult": 1.5, "atk_mult": 1.2, "reward_mult": 1.5},
@@ -79,4 +83,72 @@ ALCHEMY_CONFIG = {
             "desc": "恢复50%真元"
         },
     }
+}
+
+# ===== v3.2.9 天灾人祸 =====
+# 每小时随机触发一次天灾人祸，随机惩罚一名玩家（扣灵石 + 修为）。
+# 惩罚按「被罚者当前资产的比例」计算，天然适配不同境界的玩家：
+# 新玩家不会被一击打爆，大佬才会真正感到痛。
+# `no_event_chance`（百分比）表示「虚惊一场」的概率——此时不扣任何东西，
+# 但事件仍会播报，制造「今天差点遭殃」的戏剧感。
+CALAMITY_CONFIG = {
+    "enabled": True,
+    "interval": 3600,           # 触发间隔（秒）
+    "no_event_chance": 30,      # 无事发生概率（百分比）
+    "min_gold_loss": 0,         # 灵石扣除下限（0 = 可能不扣灵石）
+    "min_exp_loss": 0,          # 修为扣除下限（0 = 可能不扣修为）
+    "rate_jitter": 0.2,         # 扣减比例抖动幅度（±20%，避免每次都是同一个数字）
+    "shield_consumed_on_block": True,  # 定魂护盾抵挡天灾后是否消耗
+    "calamities": [
+        {
+            "id": "thunder", "name": "九天雷劫", "category": "天灾",
+            "weight": 20, "gold_rate": 0.12, "exp_rate": 0.08,
+            "desc": "紫霄神雷劈落洞府",
+        },
+        {
+            "id": "earthquake", "name": "地脉崩裂", "category": "天灾",
+            "weight": 15, "gold_rate": 0.15, "exp_rate": 0.05,
+            "desc": "地脉翻涌，洞府剧震",
+        },
+        {
+            "id": "plague", "name": "瘟疫横行", "category": "天灾",
+            "weight": 15, "gold_rate": 0.08, "exp_rate": 0.12,
+            "desc": "邪气入体，修为涣散",
+        },
+        {
+            "id": "fire", "name": "业火焚身", "category": "天灾",
+            "weight": 12, "gold_rate": 0.10, "exp_rate": 0.10,
+            "desc": "红莲业火凭空燃起",
+        },
+        {
+            "id": "flood", "name": "天河倒灌", "category": "天灾",
+            "weight": 12, "gold_rate": 0.14, "exp_rate": 0.06,
+            "desc": "九天银河倾泻而下",
+        },
+        {
+            "id": "beast", "name": "妖兽下山", "category": "天灾",
+            "weight": 14, "gold_rate": 0.11, "exp_rate": 0.07,
+            "desc": "群妖下山，扫荡洞府",
+        },
+        {
+            "id": "robber", "name": "劫修夺宝", "category": "人祸",
+            "weight": 18, "gold_rate": 0.18, "exp_rate": 0.04,
+            "desc": "蒙面劫修为夺宝闯入门庭",
+        },
+        {
+            "id": "jealousy", "name": "同道觊觎", "category": "人祸",
+            "weight": 16, "gold_rate": 0.13, "exp_rate": 0.09,
+            "desc": "同道窥伺，趁机暗算",
+        },
+        {
+            "id": "sect_pressure", "name": "宗门逼债", "category": "人祸",
+            "weight": 12, "gold_rate": 0.16, "exp_rate": 0.05,
+            "desc": "宗门催讨功德与资财",
+        },
+        {
+            "id": "rumor", "name": "谣言四起", "category": "人祸",
+            "weight": 10, "gold_rate": 0.09, "exp_rate": 0.11,
+            "desc": "流言蜚语，心神大乱",
+        },
+    ],
 }

@@ -247,8 +247,17 @@ class ShopManager:
         return (int(time.time()) - last_refresh_time) >= (refresh_hours * 3600)
 
     def generate_pavilion_items(self, item_getter, count: int) -> List[Dict]:
-        """生成阁楼物品列表（带库存和折扣）"""
+        """生成阁楼商品列表（带库存和折扣）"""
         base_items = item_getter(count * 2)  # 获取更多以便随机选择
+        # ⚠️ 治本：先按 shop_weight > 0 过滤候选池。
+        # 原实现只依赖「权重语义」排雷（_weighted_random_choice 在 len(items) <= count 时
+        # 会直接返回全部候选、完全不看权重），当 PAVILION_*_COUNT 被配得过大时
+        # shop_weight=0 的宗门专属丹会全部泄漏进丹阁/百宝阁。
+        # 这里在入口硬过滤，不再依赖抽样层兜底。
+        base_items = [
+            i for i in base_items
+            if (i.get('data') or {}).get('shop_weight', 0) > 0
+        ]
         selected = self._weighted_random_choice(
             [{'weight': i.get('data', {}).get('shop_weight', 100), **i} for i in base_items], count
         )
@@ -581,6 +590,12 @@ class ShopManager:
                             gains.append(f"{label}{sign}{value}")
                     if gains:
                         effect_desc.append("永久增益：" + "，".join(gains))
+                    # 洗髓丹/易筋丹：不提供属性增益，只提升「每境界永久增益上限」
+                    limit_inc = data.get('base_attribute_limit_increase')
+                    if limit_inc:
+                        effect_desc.append(
+                            f"每境界永久增益上限 30% → {0.3 * (1 + float(limit_inc)):.1%}"
+                        )
                 if data.get('resets_permanent_pills'):
                     refund_ratio = data.get('reset_refund_ratio', 0)
                     hint = "重置所有永久丹药增益"

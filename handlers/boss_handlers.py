@@ -11,7 +11,8 @@ class BossHandlers:
 
     async def handle_boss_info(self, event: AstrMessageEvent):
         """查询世界Boss"""
-        success, msg, _ = await self.boss_mgr.get_boss_info()
+        user_id = event.get_sender_id()
+        success, msg, _ = await self.boss_mgr.get_boss_info_for_user(user_id)
         yield event.plain_result(msg)
 
     async def handle_boss_fight(self, user_id: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:

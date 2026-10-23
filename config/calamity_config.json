@@ -1,0 +1,101 @@
+{
+  "enabled": true,
+  "interval": 3600,
+  "min_gold_loss": 0,
+  "min_exp_loss": 0,
+  "no_event_chance": 30,
+  "rate_jitter": 0.2,
+  "shield_consumed_on_block": true,
+  "calamities": [
+    {
+      "id": "thunder",
+      "name": "九天雷劫",
+      "category": "天灾",
+      "weight": 20,
+      "gold_rate": 0.12,
+      "exp_rate": 0.08,
+      "desc": "紫霄神雷劈落洞府"
+    },
+    {
+      "id": "earthquake",
+      "name": "地脉崩裂",
+      "category": "天灾",
+      "weight": 15,
+      "gold_rate": 0.15,
+      "exp_rate": 0.05,
+      "desc": "地脉翻涌，洞府剧震"
+    },
+    {
+      "id": "plague",
+      "name": "瘟疫横行",
+      "category": "天灾",
+      "weight": 15,
+      "gold_rate": 0.08,
+      "exp_rate": 0.12,
+      "desc": "邪气入体，修为涣散"
+    },
+    {
+      "id": "fire",
+      "name": "业火焚身",
+      "category": "天灾",
+      "weight": 12,
+      "gold_rate": 0.10,
+      "exp_rate": 0.10,
+      "desc": "红莲业火凭空燃起"
+    },
+    {
+      "id": "flood",
+      "name": "天河倒灌",
+      "category": "天灾",
+      "weight": 12,
+      "gold_rate": 0.14,
+      "exp_rate": 0.06,
+      "desc": "九天银河倾泻而下"
+    },
+    {
+      "id": "beast",
+      "name": "妖兽下山",
+      "category": "天灾",
+      "weight": 14,
+      "gold_rate": 0.11,
+      "exp_rate": 0.07,
+      "desc": "群妖下山，扫荡洞府"
+    },
+    {
+      "id": "robber",
+      "name": "劫修夺宝",
+      "category": "人祸",
+      "weight": 18,
+      "gold_rate": 0.18,
+      "exp_rate": 0.04,
+      "desc": "蒙面劫修为夺宝闯入门庭"
+    },
+    {
+      "id": "jealousy",
+      "name": "同道觊觎",
+      "category": "人祸",
+      "weight": 16,
+      "gold_rate": 0.13,
+      "exp_rate": 0.09,
+      "desc": "同道窥伺，趁机暗算"
+    },
+    {
+      "id": "sect_pressure",
+      "name": "宗门逼债",
+      "category": "人祸",
+      "weight": 12,
+      "gold_rate": 0.16,
+      "exp_rate": 0.05,
+      "desc": "宗门催讨功德与资财"
+    },
+    {
+      "id": "rumor",
+      "name": "谣言四起",
+      "category": "人祸",
+      "weight": 10,
+      "gold_rate": 0.09,
+      "exp_rate": 0.11,
+      "desc": "流言蜚语，心神大乱"
+    }
+  ]
+}

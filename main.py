@@ -13,13 +13,15 @@ from .handlers import (
     SectHandlers, BossHandlers, CombatHandlers, RankingHandlers,
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
-    BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers
+    BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
+    CalamityHandlers
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager, 
     RankingManager, AdventureManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
-    BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager
+    BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
+    CalamityManager
 )
 
 
@@ -167,6 +169,9 @@ CMD_SPIRIT_EYE_CLAIM = "抢占灵眼"
 CMD_SPIRIT_EYE_COLLECT = "灵眼收取"
 CMD_SPIRIT_EYE_RELEASE = "释放灵眼"
 
+# v3.2.9 天灾人祸
+CMD_CALAMITY_INFO = "天灾"
+
 CMD_REBIRTH = "弃道重修"
 class XiuXianPlugin(Star):
     """修仙插件 - 文字修仙游戏"""
@@ -246,11 +251,17 @@ class XiuXianPlugin(Star):
         self.dual_cult_handlers = DualCultivationHandlers(self.db, self.dual_cult_mgr)
         self.spirit_eye_mgr = SpiritEyeManager(self.db, self.combat_mgr, self.config_manager)
         self.spirit_eye_handlers = SpiritEyeHandlers(self.db, self.spirit_eye_mgr)
+        # v3.2.9：天灾人祸（每小时随机惩罚一名玩家）
+        self.calamity_mgr = CalamityManager(self.db, self.config_manager, self.config)
+        self.calamity_handlers = CalamityHandlers(self.db, self.calamity_mgr)
+        # 挂到 db 上，方便其他模块取用（避免层层透传参数）
+        self.db.calamity_mgr = self.calamity_mgr
         
         self.boss_task = None # Boss生成任务
         self.loan_check_task = None # 贷款逾期检查任务
         self.spirit_eye_task = None # 灵眼生成任务
         self.bounty_check_task = None  # 悬赏过期检查任务
+        self.calamity_task = None      # v3.2.9 天灾人祸定时任务
 
         access_control_config = self.config.get("ACCESS_CONTROL", {})
         self.whitelist_groups = [str(g) for g in access_control_config.get("WHITELIST_GROUPS", [])]
@@ -310,6 +321,8 @@ class XiuXianPlugin(Star):
         self.spirit_eye_task = asyncio.create_task(self._schedule_spirit_eye_spawn())
         self.bounty_check_task = asyncio.create_task(self._schedule_bounty_check())
         self.sect_daily_task = asyncio.create_task(self._schedule_sect_daily_reset())
+        # v3.2.9：天灾人祸（每小时触发）
+        self.calamity_task = asyncio.create_task(self._schedule_calamity())
         
         logger.info("【修仙插件】已加载。")
 
@@ -336,6 +349,8 @@ class XiuXianPlugin(Star):
             self.bounty_check_task.cancel()
         if getattr(self, "sect_daily_task", None):
             self.sect_daily_task.cancel()
+        if getattr(self, "calamity_task", None):
+            self.calamity_task.cancel()
         await self.db.close()
         logger.info("【修仙插件】已卸载。")
         
@@ -398,6 +413,14 @@ class XiuXianPlugin(Star):
             return
         
         # 构建广播消息
+        # v3.2.8：把挑战限制前置告知，避免玩家兴冲冲挑战却被拒
+        limit_note = ""
+        max_ch = getattr(self.boss_mgr, "max_challenges", 0)
+        cooldown = getattr(self.boss_mgr, "challenge_cooldown", 0)
+        if max_ch > 0:
+            limit_note = f"\n🎯 每位道友限挑战 {max_ch} 次（Boss 刷新后重置）"
+            if cooldown > 0:
+                limit_note += f"，挑战后需休整 {cooldown // 60} 分钟"
         broadcast_msg = (
             f"👹 世界Boss降临！\n"
             f"━━━━━━━━━━━━━━━\n"
@@ -407,7 +430,7 @@ class XiuXianPlugin(Star):
             f"攻击：{boss.atk}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"💰 击败奖励：{boss.stone_reward} 灵石\n"
-            f"⚔️ 发送「挑战Boss」参与讨伐！"
+            f"⚔️ 发送「挑战Boss」参与讨伐！{limit_note}"
         )
         
         message_chain = MessageChain().message(broadcast_msg)
@@ -532,6 +555,102 @@ class XiuXianPlugin(Star):
                         logger.warning(f"【修仙插件】贷款追杀广播发送失败 (群{group_id}): {e}")
         except Exception as e:
             logger.error(f"【修仙插件】贷款追杀广播异常: {e}")
+
+    async def _schedule_calamity(self):
+        """天灾人祸定时任务（v3.2.9：每小时随机触发一次）
+
+        与 Boss 生成一样采用**持久化下次触发时间**（`system_config`），
+        这样插件重启不会把倒计时清零。
+        """
+        import time
+
+        retry_count = 0
+        max_retry_delay = 3600
+
+        while True:
+            try:
+                await self.db.ensure_connection()
+
+                if not self.calamity_mgr or not self.calamity_mgr.enabled:
+                    # 功能关闭 → 每 10 分钟再看一眼配置是否被打开
+                    await asyncio.sleep(600)
+                    continue
+
+                interval = self.calamity_mgr.interval
+
+                next_str = await self.db.ext.get_system_config("calamity_next_time")
+                current_time = int(time.time())
+                if next_str:
+                    next_time = int(next_str)
+                    remaining = next_time - current_time
+                    if remaining > 0:
+                        await asyncio.sleep(remaining)
+                else:
+                    next_time = current_time + interval
+                    await self.db.ext.set_system_config("calamity_next_time", str(next_time))
+                    await asyncio.sleep(interval)
+
+                # 触发天灾
+                result = await self.calamity_mgr.trigger_calamity()
+                if result:
+                    logger.info(
+                        f"【修仙插件】天灾触发：{result.get('calamity_name')} → "
+                        f"{result.get('target_name')} "
+                        f"(灵石 -{result.get('gold_lost')}, 修为 -{result.get('exp_lost')})"
+                    )
+                    await self._broadcast_calamity(result)
+                    # 顺带清理过老的记录（只保留最近 200 条）
+                    try:
+                        await self.calamity_mgr.cleanup(200)
+                    except Exception:
+                        pass
+
+                # 设置下次触发时间
+                await self.db.ext.set_system_config(
+                    "calamity_next_time", str(int(time.time()) + interval)
+                )
+
+                retry_count = 0
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"【修仙插件】天灾任务异常: {e}")
+                retry_count += 1
+                delay = min(60 * (2 ** retry_count), max_retry_delay)
+                logger.info(f"【修仙插件】天灾任务将在 {delay} 秒后重试（第{retry_count}次）")
+                await asyncio.sleep(delay)
+
+    async def _broadcast_calamity(self, result: dict):
+        """广播天灾人祸消息到所有白名单群聊
+
+        v3.2.9：按用户确认的方案——**仅群广播**，不给被罚者单独发私信。
+        """
+        from astrbot.api.event import MessageChain
+
+        if not self.whitelist_groups:
+            logger.debug("【修仙插件】未配置白名单群聊，跳过天灾广播")
+            return
+
+        broadcast_msg = self.calamity_mgr.format_broadcast(result)
+        if not broadcast_msg:
+            return
+
+        message_chain = MessageChain().message(broadcast_msg)
+
+        try:
+            platforms = self.context.platform_manager.get_insts()
+            for platform in platforms:
+                platform_name = platform.meta().name if hasattr(platform, 'meta') and callable(platform.meta) else "unknown"
+                for group_id in self.whitelist_groups:
+                    umo = f"{platform_name}:GroupMessage:{group_id}"
+                    try:
+                        await self.context.send_message(umo, message_chain)
+                        logger.debug(f"【修仙插件】天灾广播已发送到群 {group_id}")
+                    except Exception as e:
+                        logger.warning(f"【修仙插件】天灾广播发送失败 (群{group_id}): {e}")
+        except Exception as e:
+            logger.error(f"【修仙插件】天灾广播异常: {e}")
 
     async def _schedule_spirit_eye_spawn(self):
         """灵眼生成定时任务（每2小时生成一个，支持指数退避）"""
@@ -949,7 +1068,14 @@ class XiuXianPlugin(Star):
         success, msg, battle_result = await self.boss_handlers.handle_boss_fight(user_id)
         yield event.plain_result(msg)
         
-        if success and battle_result and battle_result.get("winner") == user_id:
+        # v3.2.8：只有**真正的击杀者**才广播击杀消息
+        # （并发挑战时后手方虽模拟出「胜利」，但 Boss 已被他人抢先击杀）
+        if (
+            success
+            and battle_result
+            and battle_result.get("winner") == user_id
+            and battle_result.get("actually_killed")
+        ):
             player = await self.db.get_player_by_id(user_id)
             player_name = player.user_name if player and player.user_name else f"道友{str(user_id)[:6]}"
             await self._broadcast_boss_defeat(player_name, battle_result)
@@ -1309,4 +1435,11 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_spirit_eye_release(self, event: AstrMessageEvent):
         async for r in self.spirit_eye_handlers.handle_release(event):
+            yield r
+
+    # ===== v3.2.9 天灾人祸 =====
+    @filter.command(CMD_CALAMITY_INFO, "查看天灾纪事与受害档案")
+    @require_whitelist
+    async def handle_calamity_info(self, event: AstrMessageEvent):
+        async for r in self.calamity_handlers.handle_calamity_info(event):
             yield r

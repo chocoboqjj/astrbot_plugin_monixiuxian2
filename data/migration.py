@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 23  # v23: 贷款债务继承追溯（inherit_count/inherit_principal/inherit_at + 去除 UNIQUE(user_id,status)）
+LATEST_DB_VERSION = 25  # v25: 天灾人祸记录（calamity_records 表）
 
 # 灵眼时效（小时）：与 managers/spirit_eye_manager.py::SPIRIT_EYE_TYPES 保持一致。
 # 迁移函数内不能 import managers.*（会引发循环依赖），故在此复制一份并由测试断言一致性。
@@ -644,6 +644,44 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             last_eye_time INTEGER NOT NULL DEFAULT 0
         )
     """)
+
+    # 世界Boss挑战记录表（v24）：按「玩家 × Boss 实例」计次数，Boss 刷新后自动重置
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS boss_challenges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            boss_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            challenge_count INTEGER NOT NULL DEFAULT 0,
+            last_challenge_time INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(boss_id, user_id)
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_boss_challenges_user ON boss_challenges(user_id)"
+    )
+
+    # 天灾人祸记录表（v25）：记录每次天灾的类型、被罚者与实际损失
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS calamity_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            calamity_id TEXT NOT NULL DEFAULT '',
+            calamity_name TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '天灾',
+            target_user_id TEXT NOT NULL,
+            target_name TEXT NOT NULL DEFAULT '',
+            gold_lost INTEGER NOT NULL DEFAULT 0,
+            exp_lost INTEGER NOT NULL DEFAULT 0,
+            no_event INTEGER NOT NULL DEFAULT 0,
+            shielded INTEGER NOT NULL DEFAULT 0,
+            create_time INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_calamity_records_time ON calamity_records(create_time)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_calamity_records_user ON calamity_records(target_user_id)"
+    )
 
     # ===== 种子数据 =====
     # 默认秘境（v15 的种子数据；缺失会导致 /秘境列表 永远为空）
@@ -1404,3 +1442,84 @@ async def _migrate_to_v23(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v23迁移完成：贷款债务继承机制已启用")
+
+
+@migration(24)
+async def _migrate_to_v24(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v24 - 世界Boss挑战次数限制
+
+    背景：
+      此前 `challenge_boss` 没有任何次数/冷却限制，且每次挑战前会把玩家
+      气血重算为满值（`player.hp = player_stats.hp`），失败还按伤害比例
+      发「安慰奖」⇒ 玩家可以连发无限次「挑战Boss」：
+        1. 无限刷安慰奖（每次失败都按伤害比例给灵石）；
+        2. 把 Boss 血量磨到濒死，让后续玩家轻松收割（抢人头）；
+        3. 无视自身战力差距反复送死。
+
+    变更：
+      新增 `boss_challenges` 表，记录「玩家 × 某只 Boss」的挑战次数与
+      上次挑战时间。次数按 Boss 实例（boss_id）计数，Boss 刷新后自然是
+      新 boss_id ⇒ 次数自动重置，无需额外的每日重置任务。
+    """
+    logger.info("开始迁移到v24：世界Boss挑战次数限制")
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS boss_challenges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            boss_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            challenge_count INTEGER NOT NULL DEFAULT 0,
+            last_challenge_time INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(boss_id, user_id)
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_boss_challenges_user ON boss_challenges(user_id)"
+    )
+
+    await conn.commit()
+    logger.info("v24迁移完成：世界Boss挑战次数限制已启用")
+
+
+@migration(25)
+async def _migrate_to_v25(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v25 - 天灾人祸记录
+
+    背景：
+      每小时触发的「天灾人祸」需要留下可查询的历史，让玩家能回顾
+      「最近发生过哪些天灾、被谁连累」，也让 `/天灾` 指令有数据可查。
+
+    变更：
+      新增 `calamity_records` 表，记录每次天灾的：
+        - 天灾类型与分类（天灾 / 人祸）
+        - 被罚玩家 ID 与道号
+        - 实际扣除的灵石与修为
+        - 是否为「虚惊一场」（无事发生）与是否被定魂护盾挡下
+        - 触发时间
+    """
+    logger.info("开始迁移到v25：天灾人祸记录")
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS calamity_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            calamity_id TEXT NOT NULL DEFAULT '',
+            calamity_name TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '天灾',
+            target_user_id TEXT NOT NULL,
+            target_name TEXT NOT NULL DEFAULT '',
+            gold_lost INTEGER NOT NULL DEFAULT 0,
+            exp_lost INTEGER NOT NULL DEFAULT 0,
+            no_event INTEGER NOT NULL DEFAULT 0,
+            shielded INTEGER NOT NULL DEFAULT 0,
+            create_time INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_calamity_records_time ON calamity_records(create_time)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_calamity_records_user ON calamity_records(target_user_id)"
+    )
+
+    await conn.commit()
+    logger.info("v25迁移完成：天灾人祸记录已启用")

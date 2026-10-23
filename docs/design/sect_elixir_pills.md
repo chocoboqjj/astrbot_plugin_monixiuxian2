@@ -65,7 +65,7 @@ return False, "丹药【聚气丹】配置不存在！"          # 玩家：领�
 | `death_protection_multiplier` | ✅ 是 | `permanent` | 任意 | `_use_permanent_pill` 独立分支 |
 | `spiritual_qi_restore` / `blood_qi_restore` / `blocks_next_debuff` / `resets_permanent_pills` | ✅ 是 | `instant` | 任意 | `_use_instant_pill` |
 | `*_regen_per_minute` / `*_cost_per_minute` | ✅ 是 | `temporary` | 任意 | `_apply_periodic_effects` |
-| **`base_attribute_limit_increase`** | ❌ **否（无任何消费点）** | — | — | 全库 grep 仅命中 `utility_pills.json`（洗髓丹/易筋丹） |
+| **`base_attribute_limit_increase`** | ✅ 是（**v3.3.0 起已实现**） | `permanent` | 任意 | `PillManager._get_base_limit_ratio()`：以**倍率**形式提升「每境界永久增益上限比例」（默认 30%），加成存 `permanent_pill_gains` 顶层 `BASE_LIMIT_KEY`；洗髓丹（+5%）/易筋丹（+10%）由此可用 |
 | **会心率 / crit 相关任意字段** | ❌ **否（不存在该字段）** | — | — | 会心率唯一来源是传承 `impart_know_per`（player_handler:141 / ranking_manager:124 / boss_manager:192） |
 
 ### 2.3 关于 `breakthrough_handler.py:62` 的 `breakthrough_bonus`
@@ -194,12 +194,14 @@ return False, "丹药【聚气丹】配置不存在！"          # 玩家：领�
 5 阶丹房每日 5 颗，全部 `/回收`（50%）约 8,800 灵石/日。目前丹房 5 阶需 250,000 灵石 + 8,000 资材，
 回收回本约 28 天，看着可控；若认为偏高，可下调 `price` 或给宗门丹药加「不可回收」标记（当前无此标记，需新增）。
 
-### 🔴 风险-2（新发现，非本次引入）：`utility_pills.json` 存在重名条目
+### ✅ 风险-2（**已于 v3.3.0 修复**）：`utility_pills.json` 存在重名条目
 
-`util_128 混元血容丹`（皇品 / 15000）与 `util_142 混元血容丹`（混元先天 / 2000000）重名。
+`util_128 混元血容丹`（皇品 / 15000）与 `util_142 混元血容丹`（混元先天 / 2000000）曾重名。
 `ConfigManager._load_items_data` 以 name 为 key 建字典 → **后者静默覆盖前者**，
-导致商店/回收实际用的是 2,000,000 的价格（回收可得 1,000,000/颗）。
-建议尽快复查并改名（P1，本次未动）。
+导致 15000 档彻底不可达。
+**v3.3.0 修复**：15000 档更名为 **「百炼血容丹」**（200 万档保留「混元血容丹」），
+存量玩家背包中的「混元血容丹」仍解析到 `util_142`，行为零变化；
+同时 `_load_items_data` 增加**重名告警**，同类问题不再静默复发。
 
 ---
 
@@ -308,8 +310,9 @@ README 第 132 / 502 行「聚气丹 → 洗髓丹」→「聚气丹 → 宗门�
 
 | 级别 | 问题 | 状态 |
 |---|---|---|
-| P2 | 回元丹/洗髓丹的跨系能量（灵修气血、体修灵气）实得 +30，因境界表缺 `breakthrough_blood_qi_gain` / `breakthrough_spiritual_qi_gain` | 待立项 |
-| P3 | 洗髓丹 8 项属性仅 6/8（灵修）、5/8（体修）达标，体修法伤 +0 | 待立项 |
-| P3 | `_weighted_random_choice` 抽样数 ≥ 候选池时不看权重 ⇒ `shop_weight=0` 失效（仅当 `PAVILION_PILL_COUNT ≥ 203` 触发） | 待立项 |
-| P1 | `util_128` / `util_142` 混元血容丹重名，200 万静默覆盖 1.5 万 | 已单独立项 |
+| P2 | 回元丹/洗髓丹的跨系能量（灵修气血、体修灵气）实得 +30，因境界表缺 `breakthrough_blood_qi_gain` / `breakthrough_spiritual_qi_gain` | ✅ **v3.3.0 已修**（代码层基准兜底，境界表零改动） |
+| P3 | 洗髓丹 8 项属性仅 6/8（灵修）、5/8（体修）达标，体修法伤 +0 | ✅ **v3.3.0 已修**（成长量为 0 时回退到当前属性值作基准） |
+| P3 | `_weighted_random_choice` 抽样数 ≥ 候选池时不看权重 ⇒ `shop_weight=0` 失效（仅当 `PAVILION_PILL_COUNT ≥ 203` 触发） | ✅ **v3.3.0 已修**（`generate_pavilion_items` 入口按 `shop_weight > 0` 硬过滤） |
+| P1 | `util_128` / `util_142` 混元血容丹重名，200 万静默覆盖 1.5 万 | ✅ **v3.3.0 已修**（15000 档改名「百炼血容丹」+ 重名告警护栏） |
+| P2 | 全局「洗髓丹」`base_attribute_limit_increase` 无消费点（摆设丹药） | ✅ **v3.3.0 已修**（提升每境界永久增益上限比例，30% → 31.5% / 33%） |
 | P3 | `test_recycle_alchemy.py` 炼丹 `random.randint` 未固定种子，约 8% flaky | 已单独立项 |
