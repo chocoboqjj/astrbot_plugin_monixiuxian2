@@ -5,6 +5,7 @@
 
 import aiosqlite
 import json
+import time
 from typing import List, Optional
 from ..models_extended import (
     Sect, BuffInfo, Boss, Rift, ImpartInfo, UserCd
@@ -762,7 +763,8 @@ class DatabaseExtended:
     async def get_active_loan(self, user_id: str) -> Optional[dict]:
         """获取用户当前活跃的贷款"""
         async with self.conn.execute(
-            """SELECT id, user_id, principal, interest_rate, borrowed_at, due_at, status, loan_type
+            """SELECT id, user_id, principal, interest_rate, borrowed_at, due_at, status, loan_type,
+                      inherit_count, settled_amount
                FROM bank_loans WHERE user_id = ? AND status = 'active'""",
             (user_id,)
         ) as cursor:
@@ -776,9 +778,90 @@ class DatabaseExtended:
                     "borrowed_at": row[4],
                     "due_at": row[5],
                     "status": row[6],
-                    "loan_type": row[7]
+                    "loan_type": row[7],
+                    "inherit_count": row[8],
+                    "settled_amount": row[9]
                 }
             return None
+
+    async def get_carried_loan(self, user_id: str) -> Optional[dict]:
+        """获取玩家待继承（延续）的贷款
+
+        玩家死亡且贷款未还清时，该贷款会被置为 'carried' 状态并保留在库中，
+        等待玩家重开（我要修仙）后恢复为正常贷款。
+        """
+        async with self.conn.execute(
+            """SELECT id, user_id, principal, interest_rate, borrowed_at, due_at, status, loan_type,
+                      inherit_count, settled_amount, inherit_at
+               FROM bank_loans WHERE user_id = ? AND status = 'carried'""",
+            (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "id": row[0],
+                    "user_id": row[1],
+                    "principal": row[2],
+                    "interest_rate": row[3],
+                    "borrowed_at": row[4],
+                    "due_at": row[5],
+                    "status": row[6],
+                    "loan_type": row[7],
+                    "inherit_count": row[8],
+                    "settled_amount": row[9],
+                    "inherit_at": row[10]
+                }
+            return None
+
+    async def restore_carried_loan(self, user_id: str, grace_days: int = 7) -> Optional[dict]:
+        """玩家重开时把延续债务恢复为正常贷款
+
+        恢复后的贷款：
+          - 本金 = 死亡时锁定的应还总额（本金 + 已产生利息），之后固定免息不再增长
+          - 利率置 0（固定免息）
+          - 到期时间 = now + 宽限期
+          - 银行账户一并重建（级联删除时已被清空）
+
+        Returns:
+            恢复后的贷款信息；无延续债务时返回 None
+        """
+        loan = await self.get_carried_loan(user_id)
+        if not loan:
+            return None
+
+        now = int(time.time())
+        due_at = now + max(1, int(grace_days)) * 86400
+        total = loan["settled_amount"] or loan["principal"]
+
+        await self.conn.execute(
+            """UPDATE bank_loans
+               SET status = 'active',
+                   principal = ?,
+                   interest_rate = 0.0,
+                   borrowed_at = ?,
+                   due_at = ?,
+                   grace_until = ?
+               WHERE id = ?""",
+            (total, now, due_at, due_at, loan["id"])
+        )
+        # 重建银行账户（玩家死亡时账户已被级联删除）
+        await self.conn.execute(
+            """INSERT INTO bank_accounts (user_id, balance, last_interest_time)
+               VALUES (?, 0, ?)
+               ON CONFLICT(user_id) DO NOTHING""",
+            (user_id, now)
+        )
+        await self.conn.commit()
+
+        return {
+            **loan,
+            "principal": total,
+            "interest_rate": 0.0,
+            "borrowed_at": now,
+            "due_at": due_at,
+            "grace_until": due_at,
+            "status": "active"
+        }
     
     async def create_loan(self, user_id: str, principal: int, interest_rate: float, 
                           borrowed_at: int, due_at: int, loan_type: str = "normal") -> int:
@@ -800,15 +883,40 @@ class DatabaseExtended:
             (loan_id,)
         )
         await self.conn.commit()
-    
-    async def mark_loan_overdue(self, loan_id: int):
-        """标记贷款逾期"""
+
+    async def mark_loan_carried(self, loan_id: int, settled_amount: int, inherit_count: int):
+        """把贷款标记为「继承待偿」（玩家死亡时未还清的债务）
+
+        Args:
+            loan_id: 贷款 ID
+            settled_amount: 锁定的应还总额（本金 + 死亡时已产生的利息），固定免息
+            inherit_count: 累计继承次数（用于「3 次后豁免」上限判定）
+        """
         await self.conn.execute(
-            "UPDATE bank_loans SET status = 'overdue' WHERE id = ?",
+            """UPDATE bank_loans
+               SET status = 'carried',
+                   settled_amount = ?,
+                   inherit_count = ?,
+                   inherit_at = ?,
+                   grace_until = 0
+               WHERE id = ?""",
+            (settled_amount, inherit_count, int(time.time()), loan_id)
+        )
+        await self.conn.commit()
+
+    async def mark_loan_overdue(self, loan_id: int):
+        """标记贷款逾期
+
+        只处理仍处于 active 的贷款：
+        银行逾期追杀流程中，级联删除已把该贷款置为 bad_debt（债务免除），
+        此时不应再被改写为 overdue，否则会覆盖掉「已免除」的最终状态。
+        """
+        await self.conn.execute(
+            "UPDATE bank_loans SET status = 'overdue' WHERE id = ? AND status = 'active'",
             (loan_id,)
         )
         await self.conn.commit()
-    
+
     async def get_overdue_loans(self, current_time: int) -> List[dict]:
         """获取所有逾期贷款"""
         loans = []

@@ -13,6 +13,9 @@
 - 成员关系清理：解散宗门时将成员 sect_id 归零
 - 级联清除玩家全部关联数据
 - 统一落库「惩罚原因」，便于日志与后续统计
+- v3.2.7：未还清的银行贷款按死因分流处理
+  - 逾期被银行追杀（BANK_KILL）→ 债务免除（避免「逾期→死→继承→再逾期」无限死循环）
+  - 其他死因（突破走火入魔 / 寿元耗尽 / 战斗死亡 / 主动重修）→ 债务继承，重开后恢复
 """
 
 from typing import Optional, Tuple
@@ -20,7 +23,49 @@ from typing import Optional, Tuple
 from ..data import DataBase
 from ..models import Player
 
-__all__ = ["PenaltyManager", "PenaltyReason"]
+__all__ = ["PenaltyManager", "PenaltyReason", "apply_death_debt"]
+
+
+async def apply_death_debt(db: DataBase, user_id: str, reason: str) -> str:
+    """玩家死亡时的贷款债务处理（v3.2.7）
+
+    - BANK_KILL（逾期被银行追杀）：债务免除，不追溯
+      （避免「逾期 → 死 → 继承 → 再逾期 → 再死」的死循环）
+    - 其他死因：债务转入「继承待偿」，重开后恢复为正常贷款
+
+    必须在级联删除之前调用：级联会把 active 贷款置为 bad_debt（免除），
+    继承逻辑必须抢在它前面把贷款转成 carried 状态。
+
+    Args:
+        db: 数据库实例（需已注入 bank_mgr）
+        user_id: 死亡玩家 ID
+        reason: 惩罚原因（见 PenaltyReason）
+
+    Returns:
+        给玩家看的说明文本；无债务或无异常时为空字符串
+    """
+    if not PenaltyReason.inherits_debt(reason):
+        return ""
+
+    bank_mgr = getattr(db, "bank_mgr", None)
+    if bank_mgr is None:
+        # 未注入 bank_mgr（降级场景）：不处理债务，保持旧的免除行为
+        return ""
+
+    try:
+        result = await bank_mgr.inherit_debt_on_death(user_id)
+    except Exception as e:
+        try:
+            from astrbot.api import logger
+            logger.error(f"[PenaltyManager] 债务继承处理异常 player={user_id}: {e}")
+        except Exception:
+            pass
+        return ""
+
+    if not result:
+        return ""
+
+    return bank_mgr.format_inherit_notice(result)
 
 
 class PenaltyReason:
@@ -37,6 +82,16 @@ class PenaltyReason:
             cls.BANK_KILL: "逾期未还款，被银行追杀",
             cls.ABANDON_REBUILD: "主动弃道重修",
         }
+
+    @classmethod
+    def inherits_debt(cls, reason: str) -> bool:
+        """该死因是否追溯（继承）未还清的银行贷款
+
+        银行逾期追杀不追溯：玩家本就因欠债而死，若债务继续继承会形成
+        「逾期 → 死 → 继承 → 再逾期 → 再死」的死循环，债务永远还不完。
+        其余死因（走火入魔 / 寿元耗尽 / 战斗死亡 / 主动重修）均追溯。
+        """
+        return reason != cls.BANK_KILL
 
 
 class PenaltyManager:
@@ -69,21 +124,26 @@ class PenaltyManager:
         """
         user_id = player.user_id
         sect_note = ""
+        debt_note = ""
 
         try:
             # 1) 宗门关系处理（传位 / 解散）
             sect_note = await self._handle_sect_membership(player)
 
-            # 2) 级联删除玩家全部关联数据
+            # 2) 债务继承（v3.2.7）：未还清的贷款按死因分流
+            #    必须在级联删除之前处理——级联会把 active 贷款置为 bad_debt（免除）
+            debt_note = await self._handle_debt_inheritance(player, reason)
+
+            # 3) 级联删除玩家全部关联数据
             await self.db.delete_player_cascade(user_id)
 
-            # 3) 记录日志
+            # 4) 记录日志
             desc = PenaltyReason.descriptions().get(reason, reason)
             if extra_note:
                 desc = f"{desc}（{extra_note}）"
             self._log_punish(user_id, player, desc)
 
-            return True, sect_note
+            return True, sect_note + debt_note
         except Exception as e:
             self._log_error(user_id, e)
             return False, f"惩罚执行失败：{e}"
@@ -91,6 +151,32 @@ class PenaltyManager:
     # ------------------------------------------------------------------
     # 内部实现
     # ------------------------------------------------------------------
+
+    async def _handle_debt_inheritance(self, player: Player, reason: str) -> str:
+        """处理死亡时的银行贷款继承，返回给玩家看的说明文本
+
+        - BANK_KILL（逾期被银行追杀）：债务免除，不追溯
+        - 其他死因：债务转入「继承待偿」，重开后恢复
+        """
+        # 银行逾期追杀不追溯债务（避免无限死循环）
+        if not PenaltyReason.inherits_debt(reason):
+            return ""
+
+        bank_mgr = getattr(self.db, "bank_mgr", None)
+        if bank_mgr is None:
+            # 未注入 bank_mgr（降级场景）：不处理债务，保持旧的免除行为
+            return ""
+
+        try:
+            result = await bank_mgr.inherit_debt_on_death(player.user_id)
+        except Exception as e:
+            self._log_error(player.user_id, e)
+            return ""
+
+        if not result:
+            return ""
+
+        return bank_mgr.format_inherit_notice(result)
     async def _handle_sect_membership(self, player: Player) -> str:
         """处理玩家与宗门的关系，返回给玩家看的说明文本
 

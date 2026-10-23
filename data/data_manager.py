@@ -296,7 +296,9 @@ class DataBase:
                 logger.warning(f"[delete_player_cascade] 忽略执行 {sql_preview}: {e}")
 
         statements = [
-            ("UPDATE spirit_eyes SET owner_id = NULL, owner_name = NULL, claim_time = NULL WHERE owner_id = ?", (user_id,)),
+            # 灵眼：玩家身死道消后释放其占据的灵眼（v3.2.6 起一并清理 last_collect_time / protect_until）
+            ("UPDATE spirit_eyes SET owner_id = NULL, owner_name = NULL, claim_time = NULL, "
+             "last_collect_time = NULL, protect_until = 0 WHERE owner_id = ?", (user_id,)),
             ("DELETE FROM blessed_lands WHERE user_id = ?", (user_id,)),
             ("DELETE FROM spirit_farms WHERE user_id = ?", (user_id,)),
             ("DELETE FROM bank_accounts WHERE user_id = ?", (user_id,)),

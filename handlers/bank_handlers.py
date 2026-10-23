@@ -46,6 +46,12 @@ class BankHandlers:
                     f"   应还总额：{loan_info['total_due']:,} 灵石",
                     f"   状态：{status}",
                 ])
+                # v3.2.7：继承债务提示（重开后恢复的贷款）
+                inherit_count = int(loan_info.get("inherit_count") or 0)
+                if inherit_count > 0:
+                    msg_lines.append(
+                        f"   ⚠️ 此为转世继承债务（第 {inherit_count}/{self.bank_mgr.debt_inherit_max} 次，固定免息）"
+                    )
         
         msg_lines.extend([
             "━━━━━━━━━━━━━━━",
@@ -105,6 +111,10 @@ class BankHandlers:
                 "💀 逾期后果：被银行追杀致死！\n"
                 "   所有修为和装备将化为虚无\n"
                 "━━━━━━━━━━━━━━━\n"
+                "⚠️ 身死不清债：贷款未还清时身死，\n"
+                "   债务会随你转世继承，重开后仍需偿还\n"
+                "   （仅逾期被银行追杀时免除，最多继承 3 次）\n"
+                "━━━━━━━━━━━━━━━\n"
                 "💡 用法：/贷款 <金额>\n"
                 "   例如：/贷款 50000"
             )
@@ -139,12 +149,15 @@ class BankHandlers:
             "interest": "📈 利息",
             "loan": "📥 贷款",
             "repay": "📤 还款",
+            "auto_repay": "📤 自动还款",
             "overdue_penalty": "⚠️ 逾期",
+            "bank_kill": "💀 逾期追杀",
         }
-        
+
         for trans in transactions:
             trans_time = time.strftime("%m-%d %H:%M", time.localtime(trans["created_at"]))
-            type_name = type_names.get(trans["trans_type"], trans["trans_type"])
+            # 未知类型兜底为中文，不要把内部英文键透出给玩家
+            type_name = type_names.get(trans["trans_type"], "📄 交易")
             amount = trans["amount"]
             amount_str = f"+{amount:,}" if amount > 0 else f"{amount:,}"
             
@@ -173,6 +186,9 @@ class BankHandlers:
                 "━━━━━━━━━━━━━━━\n"
                 "💀 逾期后果：被银行追杀致死！\n"
                 "   所有修为和装备将化为虚无\n"
+                "━━━━━━━━━━━━━━━\n"
+                "⚠️ 身死不清债：贷款未还清时身死，\n"
+                "   债务会随你转世继承，重开后仍需偿还\n"
                 "━━━━━━━━━━━━━━━\n"
                 "💡 用法：/突破贷款 <金额>"
             )

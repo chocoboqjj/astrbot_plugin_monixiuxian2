@@ -1,9 +1,10 @@
 # handlers/player_handler.py
 import time
 import random
+import json
 from datetime import datetime
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api import AstrBotConfig
+from astrbot.api import AstrBotConfig, logger
 from ..data import DataBase
 from ..core import CultivationManager, PillManager
 from ..models import Player
@@ -89,6 +90,27 @@ class PlayerHandler:
         new_player = self.cultivation_manager.generate_new_player_stats(user_id, cultivation_type)
         await self.db.create_player(new_player)
 
+        # v3.2.7：若上一世尚有未还清的贷款，债务会随玩家一同转世
+        # （死亡时由惩罚入口转入「继承待偿」，此处恢复为正常贷款）
+        debt_note = ""
+        bank_mgr = getattr(self.db, "bank_mgr", None)
+        if bank_mgr is not None:
+            try:
+                restored = await bank_mgr.restore_inherited_debt(user_id)
+            except Exception as e:
+                logger.error(f"[PlayerHandler] 恢复继承债务失败 player={user_id}: {e}")
+                restored = None
+            if restored:
+                debt_note = (
+                    f"\n━━━━━━━━━━━━━━━\n"
+                    f"⚠️ 债务追溯\n"
+                    f"你上一世尚有 {restored['principal']:,} 灵石贷款未还清\n"
+                    f"该债务已随你一同转世（第 {restored.get('inherit_count', 1)} 次）\n"
+                    f"💰 继承金额固定免息，不会再增长\n"
+                    f"⏳ 宽限期 {bank_mgr.debt_inherit_grace_days} 天，逾期仍将被银行追杀！\n"
+                    f"💡 使用「/还款」偿还，或「/银行」查看详情"
+                )
+
         # 获取灵根描述
         root_name = new_player.spiritual_root.replace("灵根", "")
         root_description = self.cultivation_manager._get_root_description(root_name)
@@ -100,7 +122,8 @@ class PlayerHandler:
             f"灵根：【{new_player.spiritual_root}】\n"
             f"评价：{root_description}\n"
             f"启动资金：{new_player.gold} 灵石\n"
-            f"━━━━━━━━━━━━━━━\n"
+            + (f"{debt_note}\n" if debt_note else "")
+            + f"━━━━━━━━━━━━━━━\n"
             f"⚠️ 修仙有风险，突破需谨慎！\n"
             f"突破失败或生命值归零会导致\n"
             f"身死道消，所有数据清除！\n"
@@ -448,9 +471,16 @@ class PlayerHandler:
         }
         routes = {}
         try:
+            # 注意：ConfigManager 上并没有 adventure_config 属性，必须从配置源直接加载，
+            # 否则 routes 恒为空、玩家会看到 scout/journey 等英文路线键。
             from ..managers.adventure_manager import AdventureManager
-            routes = {r.get("key"): r.get("name", r.get("key")) for r in
-                      (self.config_manager.adventure_config.get("routes", []) if hasattr(self.config_manager, "adventure_config") else [])}
+            if AdventureManager.CONFIG_FILE.exists():
+                with open(AdventureManager.CONFIG_FILE, "r", encoding="utf-8") as fh:
+                    adv_cfg = json.load(fh)
+                routes = {
+                    r.get("key"): r.get("name") or r.get("key")
+                    for r in adv_cfg.get("routes", [])
+                }
         except Exception:
             routes = {}
 
@@ -458,7 +488,8 @@ class PlayerHandler:
         lines = ["\n【进行中的活动】(可同时进行，互不冲突)"]
         for act in activities:
             atype = act.get("activity_type")
-            label = names.get(atype, atype)
+            # 未知活动类型兜底为中文，不要把内部英文键透出给玩家
+            label = names.get(atype, "修炼")
             extra = act.get("extra_data") or {}
 
             if atype == "cultivation":
@@ -481,7 +512,7 @@ class PlayerHandler:
                 else:
                     detail = ""
                 if atype == "adventure":
-                    route_name = routes.get(extra.get("route_key"), extra.get("route_key", "历练"))
+                    route_name = routes.get(extra.get("route_key")) or "历练"
                     lines.append(f"  · 🚶 {route_name} {detail}".rstrip())
                 elif atype == "rift":
                     lines.append(f"  · 🌀 秘境探索 {detail}".rstrip())
@@ -587,8 +618,17 @@ class PlayerHandler:
             if ok:
                 sect_note = note
             else:
+                # 兜底路径同样处理债务继承（v3.2.7）
+                from ..core.penalty_manager import apply_death_debt
+                sect_note += await apply_death_debt(
+                    self.db, player.user_id, PenaltyReason.ABANDON_REBUILD
+                )
                 await self.db.delete_player_cascade(player.user_id)
         else:
+            from ..core.penalty_manager import apply_death_debt, PenaltyReason
+            sect_note += await apply_death_debt(
+                self.db, player.user_id, PenaltyReason.ABANDON_REBUILD
+            )
             await self.db.delete_player_cascade(player.user_id)
         await self.db.ext.set_system_config(key, str(now))
 

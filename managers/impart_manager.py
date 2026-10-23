@@ -11,7 +11,16 @@ from ..models_extended import ImpartInfo
 
 class ImpartManager:
     """传承系统管理器"""
-    
+
+    # 传承属性键 → 中文名（文案统一取用，避免透出英文配置键）
+    ATTR_NAMES = {
+        "hp": "气血",
+        "mp": "真元",
+        "atk": "攻击",
+        "know": "会心",
+        "burst": "爆伤",
+    }
+
     def __init__(self, db: DataBase):
         self.db = db
     
@@ -58,4 +67,6 @@ MP加成：{impart_info.impart_mp_per * 100:.1f}%
             impart_info.impart_burst_per += value
             
         await self.db.ext.update_impart_info(impart_info)
-        return True, f"✨ 你的{type_name}传承属性增加了 {value*100:.1f}%！"
+        # 不回显原始英文属性键
+        attr_name = self.ATTR_NAMES.get(type_name, "传承")
+        return True, f"✨ 你的{attr_name}传承属性增加了 {value*100:.1f}%！"

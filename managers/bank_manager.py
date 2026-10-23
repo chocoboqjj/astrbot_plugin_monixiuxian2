@@ -19,6 +19,12 @@ DEFAULT_MIN_LOAN_AMOUNT = 1000  # 最小贷款额度 1000
 DEFAULT_BREAKTHROUGH_LOAN_RATE = 0.008  # 突破贷款日利率 0.8%（更高风险）
 DEFAULT_BREAKTHROUGH_LOAN_DURATION = 3  # 突破贷款期限 3天
 
+# ===== v3.2.7 贷款债务继承 =====
+# 玩家死亡时若贷款未还清，债务会被「继承」到重开后的新身份上。
+# 以下参数决定继承规则：
+DEFAULT_DEBT_INHERIT_MAX = 3       # 最多继承 3 次；第 4 次死亡时债务强制豁免
+DEFAULT_DEBT_INHERIT_GRACE_DAYS = 7 # 重开后恢复债务的宽限期（天）
+
 
 class BankManager:
     """灵石银行管理器"""
@@ -37,6 +43,9 @@ class BankManager:
         self.min_loan_amount = bank_config.get("MIN_LOAN_AMOUNT", DEFAULT_MIN_LOAN_AMOUNT)
         self.breakthrough_loan_rate = bank_config.get("BREAKTHROUGH_LOAN_RATE", DEFAULT_BREAKTHROUGH_LOAN_RATE)
         self.breakthrough_loan_duration = bank_config.get("BREAKTHROUGH_LOAN_DURATION", DEFAULT_BREAKTHROUGH_LOAN_DURATION)
+        # v3.2.7 债务继承参数
+        self.debt_inherit_max = bank_config.get("DEBT_INHERIT_MAX", DEFAULT_DEBT_INHERIT_MAX)
+        self.debt_inherit_grace_days = bank_config.get("DEBT_INHERIT_GRACE_DAYS", DEFAULT_DEBT_INHERIT_GRACE_DAYS)
     
     # ===== 存款相关 =====
     
@@ -350,8 +359,17 @@ class BankManager:
                 ok, note = await penalty_mgr.punish(player, PenaltyReason.BANK_KILL)
                 if not ok:
                     logger.error(f"[BankManager] 统一惩罚失败，兜底级联删除: {note}")
+                    # 兜底路径同样走统一的债务处理（v3.2.7：BANK_KILL 债务免除，不追溯）
+                    from ..core.penalty_manager import apply_death_debt
+                    await apply_death_debt(
+                        self.db, player.user_id, PenaltyReason.BANK_KILL
+                    )
                     await self.db.delete_player_cascade(player.user_id)
             else:
+                from ..core.penalty_manager import apply_death_debt, PenaltyReason
+                await apply_death_debt(
+                    self.db, player.user_id, PenaltyReason.BANK_KILL
+                )
                 await self.db.delete_player_cascade(player.user_id)
             
             # 标记贷款逾期
@@ -371,6 +389,116 @@ class BankManager:
         
         return processed
     
+    # ===== v3.2.7 贷款债务继承 =====
+
+    async def inherit_debt_on_death(self, user_id: str) -> Optional[dict]:
+        """玩家死亡时把未还清的贷款标记为「继承待偿」
+
+        设计要点：
+          - 死亡时锁定应还总额 = 本金 + 死亡时已产生的利息（固定免息，之后不再增长）
+          - 继承次数累计，超过上限（默认 3 次）时债务强制豁免，给玩家一条彻底出坑的路
+          - 逾期被银行追杀（BANK_KILL）不追溯债务（由调用方跳过本方法），避免「逾期→死→继承→再逾期」死循环
+
+        Args:
+            user_id: 死亡玩家 ID
+
+        Returns:
+            处理结果 dict；无未还清贷款时返回 None
+            {
+                "carried": bool,        # 是否成功继承（False 表示已豁免）
+                "waived": bool,         # 是否因超过继承上限而豁免
+                "amount": int,          # 锁定的应还总额
+                "inherit_count": int,   # 本次继承后的累计继承次数
+                "max_inherit": int,     # 继承次数上限
+                "grace_days": int,      # 重开后的宽限期天数
+            }
+        """
+        loan = await self.db.ext.get_active_loan(user_id)
+        if not loan:
+            return None
+
+        now = int(time.time())
+        days_borrowed = max(1, (now - loan["borrowed_at"]) // 86400)
+        interest = int(loan["principal"] * loan["interest_rate"] * days_borrowed)
+        settled_amount = loan["principal"] + interest
+
+        inherit_count = int(loan.get("inherit_count") or 0) + 1
+
+        if inherit_count > self.debt_inherit_max:
+            # 超过继承上限 → 强制豁免，债务一笔勾销
+            await self.db.conn.execute(
+                "UPDATE bank_loans SET status = 'bad_debt', inherit_count = ? WHERE id = ?",
+                (inherit_count, loan["id"])
+            )
+            await self.db.conn.commit()
+            logger.info(
+                f"[BankManager] 玩家 {user_id} 债务继承次数达 {inherit_count} 次"
+                f"（上限 {self.debt_inherit_max}），债务 {settled_amount:,} 灵石予以豁免"
+            )
+            return {
+                "carried": False,
+                "waived": True,
+                "amount": settled_amount,
+                "inherit_count": inherit_count,
+                "max_inherit": self.debt_inherit_max,
+                "grace_days": self.debt_inherit_grace_days,
+            }
+
+        await self.db.ext.mark_loan_carried(loan["id"], settled_amount, inherit_count)
+        logger.info(
+            f"[BankManager] 玩家 {user_id} 死亡，贷款 {settled_amount:,} 灵石转入继承待偿"
+            f"（第 {inherit_count}/{self.debt_inherit_max} 次）"
+        )
+        return {
+            "carried": True,
+            "waived": False,
+            "amount": settled_amount,
+            "interest": interest,
+            "inherit_count": inherit_count,
+            "max_inherit": self.debt_inherit_max,
+            "grace_days": self.debt_inherit_grace_days,
+        }
+
+    async def restore_inherited_debt(self, user_id: str) -> Optional[dict]:
+        """玩家重开（我要修仙）时恢复继承债务
+
+        恢复后的贷款本金 = 死亡时锁定的应还总额，利率归零（固定免息），
+        到期时间 = 当前时间 + 宽限期。同时重建被级联删除的银行账户。
+
+        Returns:
+            恢复后的贷款信息；无继承债务时返回 None
+        """
+        restored = await self.db.ext.restore_carried_loan(user_id, self.debt_inherit_grace_days)
+        if not restored:
+            return None
+
+        logger.info(
+            f"[BankManager] 玩家 {user_id} 重开，恢复继承债务 "
+            f"{restored['principal']:,} 灵石（宽限期 {self.debt_inherit_grace_days} 天）"
+        )
+        return restored
+
+    def format_inherit_notice(self, result: dict) -> str:
+        """生成继承债务的玩家提示文案"""
+        if not result:
+            return ""
+        if result.get("waived"):
+            return (
+                f"\n━━━━━━━━━━━━━━━\n"
+                f"💀 债务追缴已达上限（第 {result['max_inherit']} 次）\n"
+                f"你生前欠下的 {result['amount']:,} 灵石贷款已被免除\n"
+                f"此生再无债务缠身，好自修行"
+            )
+        return (
+            f"\n━━━━━━━━━━━━━━━\n"
+            f"⚠️ 债务追溯\n"
+            f"你生前尚有 {result['amount']:,} 灵石贷款未还清\n"
+            f"该债务已随你一同转世（第 {result['inherit_count']}/{result['max_inherit']} 次）\n"
+            f"💰 继承金额固定免息，不会再增长\n"
+            f"⏳ 宽限期 {result['grace_days']} 天，逾期仍将被银行追杀！\n"
+            f"💡 使用「/还款」偿还，或「/银行」查看详情"
+        )
+
     # ===== 流水相关 =====
     
     async def _add_transaction(self, user_id: str, trans_type: str, amount: int, 

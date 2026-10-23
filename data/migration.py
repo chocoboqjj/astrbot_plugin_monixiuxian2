@@ -5,7 +5,16 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 20  # v20: 用户CD表添加额外数据字段
+LATEST_DB_VERSION = 23  # v23: 贷款债务继承追溯（inherit_count/inherit_principal/inherit_at + 去除 UNIQUE(user_id,status)）
+
+# 灵眼时效（小时）：与 managers/spirit_eye_manager.py::SPIRIT_EYE_TYPES 保持一致。
+# 迁移函数内不能 import managers.*（会引发循环依赖），故在此复制一份并由测试断言一致性。
+SPIRIT_EYE_LIFETIME_HOURS = {
+    1: 24,   # 下品灵眼
+    2: 12,   # 中品灵眼
+    3: 6,    # 上品灵眼
+    4: 3,    # 极品灵眼
+}
 
 MIGRATION_TASKS: Dict[int, Callable[[aiosqlite.Connection, ConfigManager], Awaitable[None]]] = {}
 
@@ -492,6 +501,8 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     """)
     
     # 创建银行贷款表
+    # v23 起：移除表级 UNIQUE(user_id, status)，改为「部分唯一索引」保证同一用户
+    # 最多一条 active 贷款 + 一条 carried 继承债务（详见 _migrate_to_v23）。
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS bank_loans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -502,11 +513,22 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             due_at INTEGER NOT NULL,
             status TEXT NOT NULL DEFAULT 'active',
             loan_type TEXT NOT NULL DEFAULT 'normal',
-            UNIQUE(user_id, status)
+            inherit_count INTEGER NOT NULL DEFAULT 0,
+            settled_amount INTEGER NOT NULL DEFAULT 0,
+            inherit_at INTEGER NOT NULL DEFAULT 0,
+            grace_until INTEGER NOT NULL DEFAULT 0
         )
     """)
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_loans_user ON bank_loans(user_id)")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_loans_status ON bank_loans(status)")
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_loans_user_active "
+        "ON bank_loans(user_id) WHERE status = 'active'"
+    )
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_loans_user_carried "
+        "ON bank_loans(user_id) WHERE status = 'carried'"
+    )
     
     # 创建银行交易流水表
     await conn.execute("""
@@ -554,7 +576,7 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             land_name TEXT NOT NULL DEFAULT '小洞天',
             level INTEGER NOT NULL DEFAULT 1,
             exp_bonus REAL NOT NULL DEFAULT 0.05,
-            gold_per_hour INTEGER NOT NULL DEFAULT 100,
+            gold_per_hour INTEGER NOT NULL DEFAULT 60,
             last_collect_time INTEGER NOT NULL DEFAULT 0
         )
     """)
@@ -581,7 +603,7 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     """)
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_dual_user ON dual_cultivation(user_id)")
 
-    # 天地灵眼表（v16 + v20 增补 last_collect_time 列）
+    # 天地灵眼表（v16 + v20 增补 last_collect_time 列 + v22 增补时效/守护字段）
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS spirit_eyes (
             eye_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -592,7 +614,9 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
             owner_id TEXT,
             owner_name TEXT,
             claim_time INTEGER,
-            last_collect_time INTEGER
+            last_collect_time INTEGER,
+            expire_time INTEGER NOT NULL DEFAULT 0,
+            protect_until INTEGER NOT NULL DEFAULT 0
         )
     """)
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_spirit_eyes_owner ON spirit_eyes(owner_id)")
@@ -611,12 +635,13 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_dual_req_target ON dual_cultivation_requests(target_id)")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_dual_req_expires ON dual_cultivation_requests(expires_at)")
 
-    # 战斗冷却表（v20）
+    # 战斗冷却表（v20 + v22 增补 last_eye_time 灵眼争夺冷却）
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS combat_cooldowns (
             user_id TEXT PRIMARY KEY,
             last_duel_time INTEGER NOT NULL DEFAULT 0,
-            last_spar_time INTEGER NOT NULL DEFAULT 0
+            last_spar_time INTEGER NOT NULL DEFAULT 0,
+            last_eye_time INTEGER NOT NULL DEFAULT 0
         )
     """)
 
@@ -640,17 +665,18 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
         except Exception:
             pass
 
-    # 初始灵眼（v16 的种子数据）
+    # 初始灵眼（v16 的种子数据；v22 起带时效，到期自动消散）
     now = int(_time.time())
     initial_eyes = [
-        (1, "下品灵眼", 500, now),
-        (1, "下品灵眼", 500, now),
-        (2, "中品灵眼", 2000, now),
+        (1, "下品灵眼", 500, now, now + SPIRIT_EYE_LIFETIME_HOURS[1] * 3600),
+        (1, "下品灵眼", 500, now, now + SPIRIT_EYE_LIFETIME_HOURS[1] * 3600),
+        (2, "中品灵眼", 2000, now, now + SPIRIT_EYE_LIFETIME_HOURS[2] * 3600),
     ]
     for eye in initial_eyes:
         try:
             await conn.execute(
-                "INSERT INTO spirit_eyes (eye_type, eye_name, exp_per_hour, spawn_time) VALUES (?, ?, ?, ?)",
+                "INSERT INTO spirit_eyes (eye_type, eye_name, exp_per_hour, spawn_time, expire_time) "
+                "VALUES (?, ?, ?, ?, ?)",
                 eye
             )
         except Exception:
@@ -892,7 +918,7 @@ async def _migrate_to_v16(conn: aiosqlite.Connection, config_manager: ConfigMana
             land_name TEXT NOT NULL DEFAULT '小洞天',
             level INTEGER NOT NULL DEFAULT 1,
             exp_bonus REAL NOT NULL DEFAULT 0.05,
-            gold_per_hour INTEGER NOT NULL DEFAULT 100,
+            gold_per_hour INTEGER NOT NULL DEFAULT 60,
             last_collect_time INTEGER NOT NULL DEFAULT 0
         )
     """)
@@ -1124,3 +1150,257 @@ async def _migrate_to_v20(conn: aiosqlite.Connection, config_manager: ConfigMana
     
     await conn.commit()
     logger.info("v20迁移完成：用户CD表添加额外数据字段")
+
+
+@migration(21)
+async def _migrate_to_v21(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v21 - 洞天福地挂机产出重标定（约7天回本）
+
+    背景：
+      洞天收益原先约 4 天回本（24%/天），玩家可用「贷款 → 买洞天 → 用洞天
+      被动收益还贷」闭环净赚并白得生息资产（杠杆套利）。v3.2.5 将各档洞天
+      重标定为约 7 天回本（约 14.3%/天），并改为「贷款存续期洞天产出被
+      银行托管」来切断套利路径。
+
+    为何需要迁移：
+      blessed_lands.gold_per_hour 是**入库快照**——购置时写入当时的配置值，
+      升级时按 int(base * (1 + level*0.15)) 重算。直接改 managers 中的
+      BLESSED_LANDS 常量只对**新购/新升级**生效，存量玩家的洞天仍是旧
+      收益率，必须回填才能让经济口径一致。
+
+    做法：
+      按 land_type + level 用新基准值重算存量洞天的 gold_per_hour
+      （level=1 取基准值；level>=2 沿用升级公式 int(base*(1+level*0.15))）。
+    """
+    logger.info("开始迁移到v21：洞天福地挂机产出重标定（约7天回本）")
+
+    # 新基准：与 managers/blessed_land_manager.py::BLESSED_LANDS 保持一致
+    new_base = {
+        1: 60,     # 小洞天   10,000 灵石
+        2: 300,    # 中洞天   50,000 灵石
+        3: 1200,   # 大洞天  200,000 灵石
+        4: 3000,   # 福地    500,000 灵石
+        5: 6000,   # 洞天福地 1,000,000 灵石
+    }
+
+    try:
+        async with conn.execute("SELECT user_id, land_type, level FROM blessed_lands") as cursor:
+            rows = await cursor.fetchall()
+
+        updated = 0
+        for row in rows:
+            user_id = row[0]
+            land_type = int(row[1] or 1)
+            level = int(row[2] or 1)
+            base = new_base.get(land_type)
+            if not base:
+                continue
+            if level <= 1:
+                new_gph = base
+            else:
+                new_gph = int(base * (1 + level * 0.15))
+            await conn.execute(
+                "UPDATE blessed_lands SET gold_per_hour = ? WHERE user_id = ?",
+                (new_gph, user_id)
+            )
+            updated += 1
+
+        logger.info(f"v21迁移完成：已重算 {updated} 位玩家的洞天挂机产出")
+    except Exception as e:
+        logger.error(f"v21迁移失败（洞天产出重标定）: {e}")
+        raise
+
+    await conn.commit()
+
+
+@migration(22)
+async def _migrate_to_v22(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v22 - 天地灵眼时效化 + PVP 争夺支持
+
+    背景：
+      此前灵眼一旦被抢占就从列表消失（get_available_spirit_eyes 只查无主），
+      导致玩家既看不到别人的灵眼、也无法发起争夺；同时灵眼永不过期，
+      高阶灵眼可被长期垄断。新版将灵眼改为「有时效」资源：越高级时效越短，
+      到期自动消散（结算未收修为后删除），并支持 @人 发起 PVP 争夺。
+
+    新增字段：
+      spirit_eyes.expire_time    —— 消散时间戳（0 表示旧数据/无时效）
+      spirit_eyes.protect_until —— 守护期截止时间戳（防守成功后生效，冷却骚扰）
+      combat_cooldowns.last_eye_time —— 玩家上次发起灵眼争夺的时间（发起冷却）
+
+    存量数据处理：
+      旧灵眼的 expire_time 一律回填为「当前时间 + 该档时效」，让存量灵眼
+      获得完整的一个时效窗口，而不是上线即全灭（避免玩家资产瞬间蒸发）。
+    """
+    logger.info("开始迁移到v22：天地灵眼时效化 + PVP 争夺支持")
+
+    import time as _time
+    now = int(_time.time())
+
+    # 1) spirit_eyes 新增两列
+    for ddl in (
+        "ALTER TABLE spirit_eyes ADD COLUMN expire_time INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE spirit_eyes ADD COLUMN protect_until INTEGER NOT NULL DEFAULT 0",
+    ):
+        try:
+            await conn.execute(ddl)
+        except Exception as e:
+            logger.warning(f"添加灵眼字段失败（可能已存在）: {e}")
+
+    # 2) combat_cooldowns 新增灵眼争夺冷却列
+    try:
+        await conn.execute(
+            "ALTER TABLE combat_cooldowns ADD COLUMN last_eye_time INTEGER NOT NULL DEFAULT 0"
+        )
+    except Exception as e:
+        logger.warning(f"添加 last_eye_time 字段失败（可能已存在）: {e}")
+
+    # 3) 存量灵眼回填时效：从当前时间起算，给足一个完整窗口
+    try:
+        async with conn.execute("SELECT eye_id, eye_type FROM spirit_eyes") as cursor:
+            rows = await cursor.fetchall()
+
+        updated = 0
+        for row in rows:
+            eye_id = row[0]
+            eye_type = int(row[1] or 1)
+            hours = SPIRIT_EYE_LIFETIME_HOURS.get(eye_type, SPIRIT_EYE_LIFETIME_HOURS[1])
+            await conn.execute(
+                "UPDATE spirit_eyes SET expire_time = ?, protect_until = 0 WHERE eye_id = ?",
+                (now + hours * 3600, eye_id)
+            )
+            updated += 1
+
+        logger.info(f"v22迁移完成：已为 {updated} 处灵眼设置时效")
+    except Exception as e:
+        logger.error(f"v22迁移失败（灵眼时效化）: {e}")
+        raise
+
+    await conn.commit()
+
+
+@migration(23)
+async def _migrate_to_v23(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v23 - 贷款死亡债务继承（Death Debt Carry-over）
+
+    背景：
+      此前玩家死亡时 `delete_player_cascade` 会把 active 贷款直接置为 bad_debt（免除），
+      玩家重开（我要修仙）后债务静默消失，形成「借钱 → 死亡 → 重开白嫖」的漏洞。
+
+    变更：
+      1) 重建 bank_loans 表：
+         - 移除表级 UNIQUE(user_id, status) 约束。
+           该约束让同一用户每种 status 只能存在一行，导致：
+             * 第二次还款（active → closed）触发 IntegrityError（玩家一生只能成功还清一次贷款）
+             * 无法同时保留「历史已结清记录」与「当前活跃贷款」
+           改为使用「部分唯一索引」：同一用户最多一条 active + 一条 carried。
+         - 新增列：
+             inherit_count   —— 该债务已被继承追溯的次数（用于「3 次后豁免」上限）
+             settled_amount  —— 继承时锁定的应还总额（本金 + 死亡时已产生利息），固定免息
+             inherit_at      —— 最近一次继承的时间戳
+             grace_until     —— 重开后恢复债务的宽限期截止时间戳
+      2) 存量数据处理：
+         - 原有 active 贷款原样保留（inheritable 语义在运行时生效，无需改写本金）
+         - 已存在的 closed / bad_debt / overdue 行一并迁移，历史不清空
+    """
+    logger.info("开始迁移到v23：贷款死亡债务继承")
+
+    # 1) 确认旧表结构（兼容 bank_loans 不存在的极端情况）
+    async with conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='bank_loans'"
+    ) as cursor:
+        table_exists = await cursor.fetchone() is not None
+
+    if not table_exists:
+        # 极端场景：旧库根本没有 bank_loans，直接建新表
+        logger.warning("v23迁移：未找到 bank_loans 表，将直接创建新结构")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bank_loans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                principal INTEGER NOT NULL DEFAULT 0,
+                interest_rate REAL NOT NULL DEFAULT 0.005,
+                borrowed_at INTEGER NOT NULL,
+                due_at INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                loan_type TEXT NOT NULL DEFAULT 'normal',
+                inherit_count INTEGER NOT NULL DEFAULT 0,
+                settled_amount INTEGER NOT NULL DEFAULT 0,
+                inherit_at INTEGER NOT NULL DEFAULT 0,
+                grace_until INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_loans_user ON bank_loans(user_id)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_loans_status ON bank_loans(status)")
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_loans_user_active "
+            "ON bank_loans(user_id) WHERE status = 'active'"
+        )
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_loans_user_carried "
+            "ON bank_loans(user_id) WHERE status = 'carried'"
+        )
+        await conn.commit()
+        logger.info("v23迁移完成：已创建 bank_loans（新结构）")
+        return
+
+    # 2) 重建表：去掉表级 UNIQUE(user_id, status)，补齐新列
+    await conn.execute("ALTER TABLE bank_loans RENAME TO bank_loans_old_v22")
+
+    await conn.execute("""
+        CREATE TABLE bank_loans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            principal INTEGER NOT NULL DEFAULT 0,
+            interest_rate REAL NOT NULL DEFAULT 0.005,
+            borrowed_at INTEGER NOT NULL,
+            due_at INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            loan_type TEXT NOT NULL DEFAULT 'normal',
+            inherit_count INTEGER NOT NULL DEFAULT 0,
+            settled_amount INTEGER NOT NULL DEFAULT 0,
+            inherit_at INTEGER NOT NULL DEFAULT 0,
+            grace_until INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+    # 3) 搬运存量数据（保留 id，保证外部引用不失效）
+    await conn.execute("""
+        INSERT INTO bank_loans (
+            id, user_id, principal, interest_rate, borrowed_at, due_at,
+            status, loan_type, inherit_count, settled_amount, inherit_at, grace_until
+        )
+        SELECT id, user_id, principal, interest_rate, borrowed_at, due_at,
+               status, loan_type, 0, 0, 0, 0
+        FROM bank_loans_old_v22
+    """)
+
+    await conn.execute("DROP TABLE bank_loans_old_v22")
+
+    # 3.5) 去重：v19 建表时没有 UNIQUE(user_id,status) 约束，
+    #      极端情况下同一用户可能存在多条 active / carried 记录，
+    #      会导致下方部分唯一索引创建失败。此处按 id 倒序保留最新一条。
+    await conn.execute("""
+        DELETE FROM bank_loans
+        WHERE id NOT IN (
+            SELECT MAX(id) FROM bank_loans
+            WHERE status IN ('active', 'carried')
+            GROUP BY user_id, status
+        )
+        AND status IN ('active', 'carried')
+    """)
+
+    # 4) 重建索引（含两条部分唯一索引）
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_loans_user ON bank_loans(user_id)")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_bank_loans_status ON bank_loans(status)")
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_loans_user_active "
+        "ON bank_loans(user_id) WHERE status = 'active'"
+    )
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_loans_user_carried "
+        "ON bank_loans(user_id) WHERE status = 'carried'"
+    )
+
+    await conn.commit()
+    logger.info("v23迁移完成：贷款债务继承机制已启用")

@@ -59,42 +59,216 @@ async def get_active_activity_names(db, user_id: str) -> list:
     return [names.get(t, t) for t in types]
 
 
-def extract_target_id(event: AstrMessageEvent, arg: str = "") -> str:
+# ===== @目标用户 ID 解析 =====
+# QQ 官方机器人（qq_official 适配器）的入站消息里，被 @ 的**其他用户**不会进入消息链，
+# 而是以文本标记的形式留在纯文本中：
+#   <@!member_openid>          旧版协议
+#   <qqbot-at-user id="..."/>  新版协议
+# 其中 member_openid 与 event.get_sender_id() 同源，可直接作为玩家库主键
+# （参见腾讯官方 openclaw-qqbot 的 stripMentionText：优先取 member_openid）。
+# OneBot 侧则是结构化 At 组件 + "@昵称(QQ号)" 文本表示。
+_AT_MARKUP_PATTERNS = (
+    re.compile(r"<@!?(?P<id>[^<>\s\"']+)>"),
+    re.compile(r"<qqbot-at-user\s+id=[\"'](?P<id>[^\"']+)[\"']\s*/?>", re.IGNORECASE),
+    # OneBot v11：数组格式下 CQ 码不会残留，兼容字符串格式与历史数据
+    re.compile(r"\[CQ:at,qq=(?P<id>\d+)\]"),
+    # OneBot v11：aiocqhttp 适配器把 @ 合成为 "@昵称(QQ号)" 文本
+    re.compile(r"@[^\s(@]{0,30}\((?P<id>\d{5,})\)"),
+)
+
+# 这些值不是真实用户 ID：AstrBot 的 qq_official 适配器在消息链里放的 At 只代表"机器人自己"
+_PLACEHOLDER_IDS = {
+    "",
+    "0",
+    "all",
+    "everyone",
+    "here",
+    "none",
+    "qq_official",
+    "unknown_selfid",
+}
+
+
+def _clean_candidate_id(value) -> str:
+    """规范化候选 ID；占位符（机器人自身/全体成员等）与纯符号一律返回空串。"""
+    text = str(value if value is not None else "").strip().lstrip("@").strip()
+    if not text or text.lower() in _PLACEHOLDER_IDS:
+        return ""
+    if not any(ch.isalnum() for ch in text):
+        return ""
+    return text
+
+
+def _get_message_text(event) -> str:
+    """安全获取消息纯文本。"""
+    try:
+        if hasattr(event, "get_message_str"):
+            return event.get_message_str() or ""
+    except Exception:
+        pass
+    return ""
+
+
+def _iter_self_ids(event) -> set:
+    """机器人自身 ID 与发送者 ID：消息链里代表这两个身份的 At 必须跳过。"""
+    values = set()
+    for name in ("get_self_id", "get_sender_id"):
+        try:
+            getter = getattr(event, name, None)
+            value = getter() if callable(getter) else None
+        except Exception:
+            value = None
+        if value:
+            values.add(str(value))
+    return values
+
+
+def _iter_text_at_ids(text: str):
+    """按在文本中出现的顺序产出所有 @ 标记的用户 ID。"""
+    if not text:
+        return
+    hits = []
+    for pattern in _AT_MARKUP_PATTERNS:
+        for match in pattern.finditer(text):
+            candidate = _clean_candidate_id(match.group("id"))
+            if candidate:
+                hits.append((match.start(), candidate))
+    for _, candidate in sorted(hits, key=lambda item: item[0]):
+        yield candidate
+
+
+def strip_at_markup(text: str) -> str:
+    """移除文本中所有已识别的 @ 标记，避免污染后续的物品名/数量等参数解析。"""
+    if not text:
+        return text
+    for pattern in _AT_MARKUP_PATTERNS:
+        text = pattern.sub(" ", text)
+    return text
+
+
+def strip_target_from_text(text: str, target_id: str = "") -> str:
+    """剔除 @ 标记以及已解析出的目标 ID（含可选的 @ 前缀）。"""
+    cleaned = strip_at_markup(text)
+    if target_id:
+        cleaned = re.sub(
+            r"(?<!\S)@?" + re.escape(str(target_id)) + r"(?!\S)",
+            " ",
+            cleaned,
+        )
+    return cleaned
+
+
+def looks_like_user_id(token: str) -> bool:
+    """判断 token 是否像"用户 ID"而非普通参数（如物品名）。
+
+    QQ 官方机器人的 openid 与 OneBot 的 QQ 号都是非中文、长度 >= 5 的串；
+    游戏内物品名均为中文，据此可在没有 @ 标记时区分二者。
+    """
+    text = str(token if token is not None else "").strip().lstrip("@").strip()
+    if len(text) < 5:
+        return False
+    return not any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def _extract_mention_from_raw(event) -> str:
+    """QQ 官方兜底：从原始 payload 的 mentions 列表取第一个"非机器人"的 @。
+
+    某些场景下平台不会把 @ 标记留在 content 里，此时只能从结构化 mentions 还原。
+    """
+    try:
+        platform = str(event.get_platform_name() or "").lower()
+    except Exception:
+        platform = ""
+    if "qq" not in platform:
+        return ""
+    try:
+        raw = getattr(getattr(event, "message_obj", None), "raw_message", None)
+    except Exception:
+        return ""
+    mentions = raw.get("mentions") if isinstance(raw, dict) else getattr(raw, "mentions", None)
+    if not mentions:
+        return ""
+    for mention in mentions:
+        if isinstance(mention, dict):
+            def field(key, _m=mention):
+                return _m.get(key)
+        else:
+            def field(key, _m=mention):
+                return getattr(_m, key, None)
+        if field("is_you") or field("bot"):
+            continue
+        for key in ("member_openid", "id", "user_openid"):
+            candidate = _clean_candidate_id(field(key))
+            if candidate:
+                return candidate
+    return ""
+
+
+def extract_target_id(
+    event: AstrMessageEvent,
+    arg: str = "",
+    allow_bare_id: bool = True,
+    allow_text_number: bool = True,
+) -> str:
     """统一提取目标用户ID，兼容 OneBot(CQ码/At/纯数字) 与 QQ 官方机器人(At/openid)。
 
     提取优先级：
-      1. 消息链中的 At 组件（取 qq/target/uin/user_id，并去掉可能的 @ 前缀）
-      2. 指令参数 arg（去掉 @ 前缀后直接作为 ID，兼容 openid 等非数字 ID）
-      3. 消息纯文本兜底（主要服务 OneBot 场景：残留 CQ 码 / 纯数字 ID）
+      1. 消息链中的 At 组件（OneBot 可靠；QQ 官方下只会有一个代表"机器人自己"的
+         占位 At，已按 self_id / 占位符剔除，不会误取机器人自身）
+      2. 指令参数与消息纯文本中的 @ 标记（QQ 官方：<@!member_openid> / <qqbot-at-user .../>）
+      3. 原始 payload 的 mentions 列表（QQ 官方兜底）
+      4. 指令参数本身作为裸 ID（兼容 openid 等非数字 ID）
+      5. 消息纯文本中的独立数字 token（OneBot 历史兜底）
 
     说明：QQ 官方机器人的 user_id / group_openid 为非数字字符串，
     因此不能再使用 isdigit() 来判断一个 ID 是否有效。
+
+    Args:
+        event: 消息事件
+        arg: 指令参数
+        allow_bare_id: 是否允许把参数本身当作裸 ID（第 4 级）。
+            关闭后仅返回"显式 @"的目标，用于与数字型参数（如灵眼编号）共存。
+        allow_text_number: 是否允许从纯文本中捞独立数字 token（第 5 级）。
     """
-    # 1) 消息链 At 组件优先（两个平台均可靠）
+    self_ids = _iter_self_ids(event)
+
+    # 1) 消息链 At 组件（两个平台均可靠，但需剔除"机器人自己"那个）
     if hasattr(event, "message_obj") and event.message_obj:
         chain = getattr(event.message_obj, "message", []) or []
         for comp in chain:
-            if isinstance(comp, At):
-                for attr in ("qq", "target", "uin", "user_id"):
-                    val = getattr(comp, attr, None)
-                    if val:
-                        return str(val).lstrip("@")
+            if not isinstance(comp, At):
+                continue
+            for attr in ("qq", "target", "uin", "user_id"):
+                candidate = _clean_candidate_id(getattr(comp, attr, None))
+                if not candidate or candidate in self_ids:
+                    continue
+                return candidate
 
-    # 2) 指令参数（兼容 /指令 @某人 或 /指令 用户ID）
-    if arg:
-        cleaned = arg.strip().lstrip("@").strip()
-        if cleaned:
-            return cleaned
+    # 2) 指令参数 / 消息纯文本里的 @ 标记（先扫参数：参数就是用户 @ 的位置）
+    for text in (arg or "", _get_message_text(event)):
+        for candidate in _iter_text_at_ids(text):
+            return candidate
 
-    # 3) 纯文本兜底（主要服务 OneBot 场景）
-    if hasattr(event, "get_message_str"):
-        text = event.get_message_str() or ""
-        at_match = re.search(r"\[CQ:at,qq=(\d+)\]", text)
-        if at_match:
-            return at_match.group(1)
-        num_match = re.search(r"(\d{5,})", text)
-        if num_match:
-            return num_match.group(1)
+    # 3) 原始 payload 的 mentions 兜底
+    candidate = _extract_mention_from_raw(event)
+    if candidate:
+        return candidate
+
+    # 4) 指令参数作为裸 ID（兼容 openid 等非数字 ID；拒绝仍未解析的标记文本）
+    if arg and allow_bare_id:
+        cleaned = str(arg).strip().lstrip("@").strip()
+        if cleaned and not any(ch in cleaned for ch in "<>[]()"):
+            candidate = _clean_candidate_id(cleaned)
+            if candidate:
+                return candidate
+
+    # 5) 纯文本中的独立数字 token（OneBot 历史兜底）
+    if allow_text_number:
+        text = _get_message_text(event)
+        if text:
+            num_match = re.search(r"(?<![0-9A-Za-z])(\d{5,})(?![0-9A-Za-z])", text)
+            if num_match:
+                return num_match.group(1)
 
     return ""
 
@@ -184,9 +358,18 @@ async def _check_loan_status(db, player: Player) -> dict:
                     else:
                         # 惩罚失败时兜底直接删除，保证「身死道消」语义一致
                         logger.error(f"[utils] 统一惩罚失败，兜底级联删除: {note}")
+                        # 兜底路径同样走统一的债务处理（v3.2.7：BANK_KILL 债务免除，不追溯）
+                        from ..core.penalty_manager import apply_death_debt
+                        await apply_death_debt(
+                            db, player.user_id, PenaltyReason.BANK_KILL
+                        )
                         await db.delete_player_cascade(player.user_id)
                 else:
                     # 降级：未注入 penalty_mgr 时保持原有行为
+                    from ..core.penalty_manager import apply_death_debt, PenaltyReason
+                    await apply_death_debt(
+                        db, player.user_id, PenaltyReason.BANK_KILL
+                    )
                     await db.delete_player_cascade(player.user_id)
                 
                 # 标记贷款逾期

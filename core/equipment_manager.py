@@ -11,6 +11,16 @@ if TYPE_CHECKING:
 class EquipmentManager:
     """装备管理器 - 处理装备的穿戴、卸下和属性计算"""
 
+    # 装备类型 → 中文名（错误提示统一取用，避免透出英文配置键）
+    ITEM_TYPE_NAMES = {
+        "weapon": "武器",
+        "armor": "防具",
+        "main_technique": "心法",
+        "technique": "功法",
+        "accessory": "饰品",
+        "material": "材料",
+    }
+
     def __init__(self, db: DataBase, config_manager: "ConfigManager" = None, storage_ring_manager: "StorageRingManager" = None):
         self.db = db
         self.config_manager = config_manager
@@ -237,7 +247,8 @@ class EquipmentManager:
             return True, f"已装备功法【{item.name}】（{item.rank}）（{len(techniques_list)}/3）"
 
         else:
-            return False, f"未知的装备类型：{item.item_type}"
+            # 不回显原始英文配置键
+            return False, f"未知的装备类型：{self.ITEM_TYPE_NAMES.get(item.item_type, '未知类型')}"
 
     async def unequip_item(self, player: Player, slot_or_name: str) -> tuple[bool, str]:
         """卸下装备

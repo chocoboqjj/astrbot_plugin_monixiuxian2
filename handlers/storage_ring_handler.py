@@ -1,12 +1,12 @@
 # handlers/storage_ring_handler.py
 
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.all import At, Plain
+from astrbot.api.all import Plain
 from ..data import DataBase
 from ..core import StorageRingManager
 from ..config_manager import ConfigManager
 from ..models import Player
-from .utils import player_required
+from .utils import player_required, extract_target_id, looks_like_user_id, strip_target_from_text
 
 CMD_STORAGE_RING = "储物戒"
 CMD_STORE_ITEM = "存入"
@@ -180,20 +180,12 @@ class StorageRingHandler:
         item_name = None
         count = 1
 
-        # 从消息链中提取 At 组件和 Plain 文本
+        # 从消息链中提取 Plain 文本
         text_parts = []
         message_chain = event.message_obj.message if hasattr(event, 'message_obj') and event.message_obj else []
         
         for comp in message_chain:
-            if isinstance(comp, At):
-                # 兼容多种 At 属性名（OneBot 的 qq/uin/target 与 QQ 官方机器人的 user_id）
-                if target_id is None:
-                    for attr in ("qq", "target", "uin", "user_id"):
-                        val = getattr(comp, attr, None)
-                        if val:
-                            target_id = str(val).lstrip("@")
-                            break
-            elif isinstance(comp, Plain):
+            if isinstance(comp, Plain):
                 text_parts.append(comp.text)
 
         # 合并文本内容并移除命令前缀
@@ -202,15 +194,22 @@ class StorageRingHandler:
             if text_content.startswith(prefix):
                 text_content = text_content[len(prefix):].strip()
                 break
-        
-        # 如果没有从At组件获取到target_id，尝试从文本解析纯数字QQ号
+
+        # 目标玩家：统一走 extract_target_id
+        # （OneBot 用消息链 At 组件；QQ 官方机器人用纯文本里的 <@!member_openid> 标记，
+        #  此时消息链里的 At 只代表"机器人自己"，不能作为目标）
+        target_id = extract_target_id(event, "")
+
+        # 没有 @ 标记时，兼容手填 ID / openid（取文本首个 token）
         if not target_id and text_content:
-            parts = text_content.split(None, 1)
-            if len(parts) >= 1:
-                potential_id = parts[0].lstrip('@')
-                if potential_id.isdigit() and len(potential_id) >= 5:
-                    target_id = potential_id
-                    text_content = parts[1].strip() if len(parts) > 1 else ""
+            head, _, rest = text_content.partition(" ")
+            if looks_like_user_id(head):
+                target_id = head
+                text_content = rest.strip()
+
+        # 剔除 @ 标记与目标 ID，避免污染物品名解析
+        if target_id:
+            text_content = strip_target_from_text(text_content, target_id).strip()
 
         # 解析物品名和数量
         if text_content:
@@ -227,7 +226,7 @@ class StorageRingHandler:
                 f"请指定赠予对象\n"
                 f"用法：{CMD_GIFT_ITEM} @某人 物品名 [数量]\n"
                 f"或：{CMD_GIFT_ITEM} 用户ID 物品名 [数量]\n"
-                f"示例：{CMD_GIFT_ITEM} 123456789 精铁 5"
+                f"提示：QQ 官方机器人下请直接 @对方，或填写其 openid"
             )
             return
 

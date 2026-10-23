@@ -12,6 +12,27 @@ from ..config_manager import ConfigManager
 class PillManager:
     """丹药管理器 - 处理丹药效果、属性加成和限制机制"""
 
+    # 丹药效果类型 → 中文名（错误提示统一取用，避免透出英文配置键）
+    EFFECT_TYPE_NAMES = {
+        "instant": "即时",
+        "temporary": "临时",
+        "permanent": "永久",
+    }
+
+    # 百分比增益键 → (玩家当前属性名, 折算后的固定增益键)
+    # 用于表达「上限 +5%」「全部属性 +2%」这类按玩家当前属性比例生效的永久增益。
+    # 折算后的数值仍会走每境界 30% 上限逻辑，避免百分比丹药绕开上限无限叠属性。
+    PERCENT_GAIN_KEYS = {
+        "physical_damage_gain_percent": ("physical_damage", "physical_damage_gain"),
+        "magic_damage_gain_percent": ("magic_damage", "magic_damage_gain"),
+        "physical_defense_gain_percent": ("physical_defense", "physical_defense_gain"),
+        "magic_defense_gain_percent": ("magic_defense", "magic_defense_gain"),
+        "mental_power_gain_percent": ("mental_power", "mental_power_gain"),
+        "lifespan_gain_percent": ("lifespan", "lifespan_gain"),
+        "max_spiritual_qi_gain_percent": ("max_spiritual_qi", "max_spiritual_qi_gain"),
+        "max_blood_qi_gain_percent": ("max_blood_qi", "max_blood_qi_gain"),
+    }
+
     def __init__(self, db: DataBase, config_manager: ConfigManager, plugin_config=None):
         self.db = db
         self.config_manager = config_manager
@@ -182,7 +203,8 @@ class PillManager:
             # 瞬间效果丹药
             return await self._use_instant_pill(player, pill_name, pill_data)
         else:
-            return False, f"未知的丹药类型：{effect_type}"
+            # 不回显原始英文配置键
+            return False, f"未知的丹药类型：{self.EFFECT_TYPE_NAMES.get(effect_type, '未知类型')}"
 
     async def _use_exp_pill(self, player: Player, pill_name: str, pill_data: dict) -> Tuple[bool, str]:
         """使用修为丹"""
@@ -254,7 +276,7 @@ class PillManager:
             "physical_defense_multiplier", "magic_defense_multiplier",
             "lifespan_cost_per_minute", "lifespan_regen_per_minute",
             "spiritual_qi_regen_per_minute", "blood_qi_regen_per_minute", "blood_qi_cost_per_minute",
-            "breakthrough_bonus"
+            "breakthrough_bonus", "temp_bonus_cap"
         ]
         for key in effect_keys:
             if key in pill_data:
@@ -384,11 +406,18 @@ class PillManager:
         gains_applied = {}
         gains_blocked = {}
 
+        # 百分比增益先按玩家当前属性折算成固定数值，再统一走下面的上限逻辑
+        resolved_pill_data = self._resolve_percentage_gains(player, pill_data)
+
         for gain_key, (attr_key, attr_name) in attr_mapping.items():
-            if gain_key not in pill_data:
+            if gain_key not in resolved_pill_data:
                 continue
 
-            gain = pill_data[gain_key]
+            gain = resolved_pill_data[gain_key]
+            try:
+                gain = int(gain)
+            except (TypeError, ValueError):
+                continue
             if gain == 0:
                 continue
 
@@ -404,8 +433,12 @@ class PillManager:
 
                 # 计算实际可以增加的值
                 actual_gain = min(gain, limit - current_gain)
+                if int(actual_gain) <= 0:
+                    # 剩余额度不足 1 点：不应用，避免展示「物伤 +0」这类无意义增益
+                    gains_blocked[attr_name] = "本境界增益额度已不足"
+                    continue
                 if actual_gain < gain:
-                    gains_blocked[attr_name] = f"部分受限(+{actual_gain:.0f}/{gain})"
+                    gains_blocked[attr_name] = f"部分受限(+{int(actual_gain)}/{gain})"
 
                 # 应用增益
                 permanent_gains[level_key][attr_key] += actual_gain
@@ -551,6 +584,35 @@ class PillManager:
         msg_parts.append("━━━━━━━━━━━━━━━")
         return True, "\n".join(msg_parts)
 
+    def _resolve_percentage_gains(self, player: Player, pill_data: dict) -> dict:
+        """把「按玩家当前属性百分比生效」的增益折算为固定数值增益
+
+        例：回元丹配置 max_spiritual_qi_gain_percent = 0.05，玩家当前最大灵气 2000
+        → 折算为 max_spiritual_qi_gain = 100，随后仍受每境界 30% 上限约束。
+
+        若同时配置了同名的固定增益键，两者相加（先百分比后叠加固定值）。
+        """
+        resolved = dict(pill_data)
+        for pct_key, (attr_key, flat_key) in self.PERCENT_GAIN_KEYS.items():
+            if pct_key not in resolved:
+                continue
+            try:
+                ratio = float(resolved.get(pct_key) or 0)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"丹药【{pill_data.get('name', '')}】的 {pct_key} 配置非法：{resolved.get(pct_key)}，已忽略"
+                )
+                continue
+
+            current_value = getattr(player, attr_key, 0) or 0
+            try:
+                flat_value = int(resolved.get(flat_key, 0) or 0)
+            except (TypeError, ValueError):
+                flat_value = 0
+
+            resolved[flat_key] = int(current_value * ratio) + flat_value
+        return resolved
+
     def _get_base_attributes_for_level(self, player: Player, level_index: int) -> dict:
         """获取当前境界的基础属性（用于计算30%上限）
 
@@ -673,6 +735,11 @@ class PillManager:
         effects = player.get_active_pill_effects()
         current_time = int(time.time())
         temp_bonus = 0.0
+        # 带上限的增益（如宗门破障丹）单独累计，避免"每日免费领 + 24h 持续"导致无限叠加，
+        # 把突破这一核心风险闸门直接抹平。不带 temp_bonus_cap 的丹药（幸运丹/天命幸运丹等）
+        # 完全走原累加逻辑，行为零变化。
+        capped_bonus = 0.0
+        capped_cap: Optional[float] = None
         has_temp_effects = False
 
         for effect in effects:
@@ -682,8 +749,22 @@ class PillManager:
 
             subtype = effect.get("subtype", "")
             if subtype in {"breakthrough_boost", "breakthrough_debuff"}:
-                temp_bonus += effect.get("breakthrough_bonus", 0)
+                bonus = effect.get("breakthrough_bonus", 0) or 0.0
+                cap = effect.get("temp_bonus_cap") if subtype == "breakthrough_boost" else None
+                if cap is not None:
+                    try:
+                        capped_bonus += float(bonus)
+                        cap = float(cap)
+                        capped_cap = cap if capped_cap is None else min(capped_cap, cap)
+                    except (TypeError, ValueError):
+                        temp_bonus += bonus
+                else:
+                    temp_bonus += bonus
                 has_temp_effects = True
+
+        # 带 cap 的增益夹紧到上限内（多颗叠加最多仍只到 cap）
+        if capped_cap is not None:
+            temp_bonus += min(capped_bonus, capped_cap)
 
         permanent_multiplier = 1.0
         permanent_gains = player.get_permanent_pill_gains()

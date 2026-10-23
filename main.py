@@ -227,6 +227,8 @@ class XiuXianPlugin(Star):
         
         # Phase 2: 灵石银行和悬赏令
         self.bank_mgr = BankManager(self.db, self.config)
+        # 挂到 db 上：v3.2.7 贷款债务继承需要跨模块取用（统一惩罚入口 / 兜底路径）
+        self.db.bank_mgr = self.bank_mgr
         self.bounty_mgr = BountyManager(self.db, self.storage_ring_mgr)
         self.bank_handlers = BankHandlers(self.db, self.bank_mgr)
         self.bounty_handlers = BountyHandlers(self.db, self.bounty_mgr)
@@ -242,7 +244,7 @@ class XiuXianPlugin(Star):
         self.spirit_farm_handlers = SpiritFarmHandlers(self.db, self.spirit_farm_mgr)
         self.dual_cult_mgr = DualCultivationManager(self.db)
         self.dual_cult_handlers = DualCultivationHandlers(self.db, self.dual_cult_mgr)
-        self.spirit_eye_mgr = SpiritEyeManager(self.db)
+        self.spirit_eye_mgr = SpiritEyeManager(self.db, self.combat_mgr, self.config_manager)
         self.spirit_eye_handlers = SpiritEyeHandlers(self.db, self.spirit_eye_mgr)
         
         self.boss_task = None # Boss生成任务
@@ -1293,8 +1295,8 @@ class XiuXianPlugin(Star):
 
     @filter.command(CMD_SPIRIT_EYE_CLAIM, "抢占灵眼")
     @require_whitelist
-    async def handle_spirit_eye_claim(self, event: AstrMessageEvent, eye_id: int = 0):
-        async for r in self.spirit_eye_handlers.handle_claim(event, eye_id):
+    async def handle_spirit_eye_claim(self, event: AstrMessageEvent, target: str = ""):
+        async for r in self.spirit_eye_handlers.handle_claim(event, target):
             yield r
 
     @filter.command(CMD_SPIRIT_EYE_COLLECT, "收取灵眼产出")

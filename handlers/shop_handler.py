@@ -15,6 +15,14 @@ __all__ = ["ShopHandler"]
 # 需要存入储物戒的物品类型（与 store_item 的存储逻辑一致）
 STORAGE_ITEM_TYPES = {'weapon', 'armor', 'main_technique', 'technique', 'accessory', 'material', '功法'}
 
+# 物品类型键 → 中文名（错误提示等文案统一取用，避免把英文配置键透给玩家）
+ITEM_TYPE_NAMES = {
+    'weapon': "武器", 'armor': "防具", 'main_technique': "心法",
+    'technique': "功法", 'accessory': "饰品", 'material': "材料",
+    'pill': "丹药", 'exp_pill': "修为丹", 'utility_pill': "功能丹",
+    'legacy_pill': "旧版丹药", '功法': "功法",
+}
+
 class ShopHandler:
     """商店处理器"""
     
@@ -245,7 +253,7 @@ class ShopHandler:
             if item_type in ['weapon', 'armor', 'main_technique', 'technique', 'accessory']:
                 success, msg = await self.storage_ring_manager.store_item(player, target_item['name'], quantity, external_transaction=True)
                 if success:
-                    type_name = {"weapon": "武器", "armor": "防具", "main_technique": "心法", "technique": "功法", "accessory": "饰品"}.get(item_type, "装备")
+                    type_name = ITEM_TYPE_NAMES.get(item_type, "装备")
                     result_lines.append(f"成功购买{type_name}【{target_item['name']}】x{quantity}，已存入储物戒。")
                 else:
                     await self.db.conn.rollback()
@@ -279,7 +287,9 @@ class ShopHandler:
                     return
             else:
                 await self.db.conn.rollback()
-                yield event.plain_result(f"未知的物品类型：{item_type}")
+                yield event.plain_result(
+                    f"未知的物品类型：{ITEM_TYPE_NAMES.get(item_type, '未知类型')}"
+                )
                 return
 
             player.gold -= total_price

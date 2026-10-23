@@ -24,6 +24,7 @@ class BountyManager:
     BOUNTY_CACHE_DURATION = 600  # 任务列表缓存10分钟
     CONFIG_FILE = Path(__file__).resolve().parents[1] / "config" / "bounty_templates.json"
     ADVENTURE_CONFIG_FILE = Path(__file__).resolve().parents[1] / "config" / "adventure_config.json"
+    RIFT_CONFIG_FILE = Path(__file__).resolve().parents[1] / "config" / "rift_config.json"
     DEFAULT_CONFIG = {
         "difficulties": {
             "easy": {"name": "F级", "stone_scale": 1.0, "exp_scale": 1.0, "min_level": 0}
@@ -102,22 +103,39 @@ class BountyManager:
 
     def _load_adventure_meta(self):
         self.adventure_tag_meta = {}
-        if not self.ADVENTURE_CONFIG_FILE.exists():
-            return
+        if self.ADVENTURE_CONFIG_FILE.exists():
+            try:
+                with open(self.ADVENTURE_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                for route in data.get("routes", []):
+                    tag = str(route.get("bounty_tag", "")).lower()
+                    if not tag:
+                        continue
+                    self.adventure_tag_meta[tag] = {
+                        "duration": int(route.get("duration", 3600)),
+                        "fatigue": int(route.get("fatigue_cooldown", 0)),
+                        # 每轮完成为该标签增加的悬赏进度（猎魔肃清 +2、九死一生 +3）
+                        "bounty_progress": max(1, int(route.get("bounty_progress", 1))),
+                    }
+                logger.info("已加载冒险路线元数据用于悬赏校准")
+            except Exception as exc:
+                logger.warning(f"加载冒险路线配置失败，将使用默认时限: {exc}")
+        # 秘境是独立并行槽位：每次探索 +1 点进度、无休整冷却，可连续刷
+        self.adventure_tag_meta.setdefault("rift", {
+            "duration": self._load_rift_duration(),
+            "fatigue": 0,
+            "bounty_progress": 1,
+        })
+
+    def _load_rift_duration(self) -> int:
+        """读取秘境单次时长（rift_config.default_duration），缺失时回退 1800 秒。"""
         try:
-            with open(self.ADVENTURE_CONFIG_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for route in data.get("routes", []):
-                tag = str(route.get("bounty_tag", "")).lower()
-                if not tag:
-                    continue
-                self.adventure_tag_meta[tag] = {
-                    "duration": int(route.get("duration", 3600)),
-                    "fatigue": int(route.get("fatigue_cooldown", 0))
-                }
-            logger.info("已加载冒险路线元数据用于悬赏校准")
+            if self.RIFT_CONFIG_FILE.exists():
+                with open(self.RIFT_CONFIG_FILE, "r", encoding="utf-8") as f:
+                    return max(60, int(json.load(f).get("default_duration", 1800)))
         except Exception as exc:
-            logger.warning(f"加载冒险路线配置失败，将使用默认时限: {exc}")
+            logger.warning(f"加载秘境配置失败，将使用默认时长: {exc}")
+        return 1800
 
     # -------- 完成方式提示 --------
 
@@ -148,6 +166,15 @@ class BountyManager:
         if not entries:
             return "历练 / 秘境"
         return "、".join(cmd for _, cmd in entries)
+
+    def _difficulty_name(self, difficulty_key: str) -> str:
+        """难度键 → 中文名（唯一来源）。
+
+        历史悬赏记录的 rewards 可能缺 difficulty_name，直接回退到 difficulty
+        会让玩家看到 easy/normal/hard/elite 等英文键，故统一走这里翻译。
+        """
+        key = str(difficulty_key or "").lower()
+        return self.difficulties.get(key, {}).get("name") or "未知难度"
 
     # -------- 列表 & 缓存 --------
 
@@ -180,12 +207,15 @@ class BountyManager:
         return bounties
 
     def _get_difficulty_plan(self, level_index: int) -> List[str]:
-        plan = ["easy", "normal"]
-        if level_index >= 7:
-            plan.append("hard")
-        if level_index >= 12:
-            plan.append("elite")
-        return [diff for diff in plan if diff in self.difficulties]
+        """按境界解锁难度档位，阈值取自配置 min_level（避免硬编码与配置脱节）。"""
+        plan = []
+        for diff in ("easy", "normal", "hard", "elite"):
+            cfg = self.difficulties.get(diff)
+            if cfg is None:
+                continue
+            if level_index >= int(cfg.get("min_level", 0)):
+                plan.append(diff)
+        return plan
 
     def _pick_template(self, difficulty: str) -> Optional[dict]:
         templates = self.templates_by_diff.get(difficulty)
@@ -237,25 +267,38 @@ class BountyManager:
 
     def _calculate_time_limit(self, template: dict, target: int) -> int:
         base_limit = template.get("time_limit", 3600)
-        unit = self._get_adventure_unit_time(template)
-        if not unit:
+        expected = self._estimate_completion_seconds(template, target)
+        if not expected:
             return base_limit
-        # 预估完成所有进度所需的最小时间
-        expected = unit * target
-        # 追加容错缓冲，兼顾疲劳与队列
-        buffer = max(600, unit // 2)
+        # 容错缓冲：至少 10 分钟，或预期时长的 1/6（覆盖受伤事件 +600s 与取整误差）
+        buffer = max(600, expected // 6)
         return max(base_limit, expected + buffer)
 
-    def _get_adventure_unit_time(self, template: dict) -> Optional[int]:
-        durations = []
+    def _estimate_completion_seconds(self, template: dict, target: int) -> Optional[int]:
+        """估算完成 target 点悬赏进度所需的墙上时间（秒）。
+
+        逐条可行路线计算「需要跑几轮 × 单轮时长（duration + fatigue）」，取**最慢**的一条：
+        - 时限不应假设玩家一定挑最快路线，且慢路线往往没有境界门槛
+          （如 D 级悬赏对 7 阶玩家只有猎魔肃清可用，九死一生要 12 阶）；
+        - 猎魔肃清每轮 +2 点、九死一生每轮 +3 点进度，必须按 ceil(target/progress)
+          计轮数，否则会把完成时间低估 2~3 倍；
+        - 秘境每次探索 +1 点、无休整冷却，可连续刷。
+        所有标签都没有路线元数据时返回 None，回退到模板自带 time_limit。
+        """
+        slowest: Optional[int] = None
         for tag in template.get("progress_tags", []):
             meta = self.adventure_tag_meta.get(tag.lower())
-            if meta:
-                # 考虑路线基础时长+部分休整
-                durations.append(meta.get("duration", 0) + meta.get("fatigue", 0))
-        if not durations:
-            return None
-        return max(60, min(durations))
+            if not meta:
+                continue
+            cycle = meta.get("duration", 0) + meta.get("fatigue", 0)
+            progress = max(1, int(meta.get("bounty_progress", 1)))
+            if cycle <= 0:
+                continue
+            rounds = -(-max(1, int(target)) // progress)  # 向上取整
+            seconds = rounds * cycle
+            if slowest is None or seconds > slowest:
+                slowest = seconds
+        return slowest
 
     # -------- 接取与状态 --------
 
@@ -300,7 +343,7 @@ class BountyManager:
                 "stone": cached["reward"]["stone"],
                 "exp": cached["reward"]["exp"],
                 "difficulty": diff_key,
-                "difficulty_name": cached.get("difficulty_name", diff_key),
+                "difficulty_name": cached.get("difficulty_name") or self._difficulty_name(diff_key),
                 "item_table": cached.get("item_table"),
                 "description": cached.get("description", ""),
                 "progress_tags": cached.get("progress_tags", [])
@@ -332,7 +375,7 @@ class BountyManager:
 
         return True, (
             f"🎯 接取悬赏成功！\n"
-            f"任务：{template['name']}（{cached.get('difficulty_name', diff_key)}）\n"
+            f"任务：{template['name']}（{cached.get('difficulty_name') or self._difficulty_name(diff_key)}）\n"
             f"目标：完成 {cached['count']} 次\n"
             f"奖励：{cached['reward']['stone']:,} 灵石 + {cached['reward']['exp']:,} 修为\n"
             f"时限：{time_limit // 60} 分钟\n"
@@ -349,7 +392,7 @@ class BountyManager:
         progress = active.get("current_progress", 0)
         target = active.get("target_count", 1)
 
-        diff_name = rewards.get("difficulty_name", rewards.get("difficulty", "未知"))
+        diff_name = rewards.get("difficulty_name") or self._difficulty_name(rewards.get("difficulty", "easy"))
         desc = rewards.get("description", "")
         hint = self.format_completion_hint(rewards.get("progress_tags", []))
 
@@ -425,7 +468,8 @@ class BountyManager:
         if self.storage_ring_manager:
             try:
                 rewards = json.loads(active["rewards"])
-                item_table = rewards.get("item_table") or active.get("target_type", "gather")
+                # target_type 存的是中文 category，不能当 item_table 键用
+                item_table = rewards.get("item_table") or "gather"
                 dropped_items, roll_msg = await self._roll_bounty_items(player, item_table)
                 if dropped_items:
                     lines = []
@@ -441,7 +485,7 @@ class BountyManager:
                 logger.warning("悬赏物品奖励发放异常", exc_info=True)
 
         rewards = json.loads(active["rewards"])
-        diff_name = rewards.get("difficulty_name", rewards.get("difficulty", "未知"))
+        diff_name = rewards.get("difficulty_name") or self._difficulty_name(rewards.get("difficulty", "easy"))
         roll_block = f"\n🎰 命数判定：{roll_msg}" if roll_msg else ""
         return True, (
             f"✅ 悬赏完成（{diff_name}）！\n"

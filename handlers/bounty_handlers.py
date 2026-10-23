@@ -23,10 +23,16 @@ class BountyHandlers:
         lines = ["📜 悬赏令 · 今日委托", "━━━━━━━━━━━━━━━"]
         for b in bounties:
             reward = b.get("reward", {})
+            time_limit = b.get("time_limit", 0) or 0
+            # 单位时间收益：让玩家能直接对比不同难度/时长的性价比
+            rate_suffix = ""
+            if time_limit > 0 and reward.get("stone", 0) > 0:
+                rate = reward["stone"] / (time_limit / 3600)
+                rate_suffix = f"（约 {rate:.0f} 灵石/时）"
             lines.append(
                 f"[{b['id']}] {b['name']}（{b.get('difficulty_name', '未知')}·{b.get('category', '任务')}）\n"
-                f"  - 目标：完成 {b.get('count')} 次 | 时限：{b.get('time_limit', 0) // 60} 分钟\n"
-                f"  - 奖励：{reward.get('stone', 0):,} 灵石 + {reward.get('exp', 0):,} 修为\n"
+                f"  - 目标：完成 {b.get('count')} 次 | 时限：{time_limit // 60} 分钟\n"
+                f"  - 奖励：{reward.get('stone', 0):,} 灵石 + {reward.get('exp', 0):,} 修为{rate_suffix}\n"
                 f"  - 说明：{b.get('description', '')}\n"
                 f"  - 完成：{self.bounty_mgr.format_completion_hint_short(b.get('progress_tags', []))}"
             )

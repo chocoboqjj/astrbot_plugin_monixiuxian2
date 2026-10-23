@@ -9,12 +9,16 @@ from ..models import Player
 __all__ = ["BlessedLandManager"]
 
 # 洞天配置
+# 经济平衡（v3.2.5）：gold_per_hour 按「价格 ÷ 7 天 ÷ 24 小时」标定，
+# 即各档洞天均约 7 天回本（约 14.3%/天），洞天回归「优质长期资产」定位。
+# 存储说明：gold_per_hour 会落库到 blessed_lands 表（升级时按 1+level*0.15 重算），
+# 故改常量只影响新购；存量洞天由 data/migration.py 的 v21 迁移重算。
 BLESSED_LANDS = {
-    1: {"name": "小洞天", "price": 10000, "exp_bonus": 0.05, "gold_per_hour": 100, "max_level": 5, "max_exp_per_hour": 5000},
-    2: {"name": "中洞天", "price": 50000, "exp_bonus": 0.10, "gold_per_hour": 500, "max_level": 10, "max_exp_per_hour": 15000},
-    3: {"name": "大洞天", "price": 200000, "exp_bonus": 0.20, "gold_per_hour": 2000, "max_level": 15, "max_exp_per_hour": 30000},
-    4: {"name": "福地", "price": 500000, "exp_bonus": 0.30, "gold_per_hour": 5000, "max_level": 20, "max_exp_per_hour": 50000},
-    5: {"name": "洞天福地", "price": 1000000, "exp_bonus": 0.50, "gold_per_hour": 10000, "max_level": 30, "max_exp_per_hour": 100000},
+    1: {"name": "小洞天", "price": 10000, "exp_bonus": 0.05, "gold_per_hour": 60, "max_level": 5, "max_exp_per_hour": 5000},
+    2: {"name": "中洞天", "price": 50000, "exp_bonus": 0.10, "gold_per_hour": 300, "max_level": 10, "max_exp_per_hour": 15000},
+    3: {"name": "大洞天", "price": 200000, "exp_bonus": 0.20, "gold_per_hour": 1200, "max_level": 15, "max_exp_per_hour": 30000},
+    4: {"name": "福地", "price": 500000, "exp_bonus": 0.30, "gold_per_hour": 3000, "max_level": 20, "max_exp_per_hour": 50000},
+    5: {"name": "洞天福地", "price": 1000000, "exp_bonus": 0.50, "gold_per_hour": 6000, "max_level": 30, "max_exp_per_hour": 100000},
 }
 
 
@@ -24,6 +28,29 @@ class BlessedLandManager:
     def __init__(self, db: DataBase):
         self.db = db
     
+    async def _get_active_loan_notice(self, player: Player) -> str:
+        """返回贷款存续期间的洞天产出托管提示（无贷款则返回空串）。
+
+        设计说明（v3.2.5 借贷套利防护）：
+          洞天福地为生息资产，历史漏洞是玩家可用「贷款 → 买洞天 → 用洞天
+          被动收益还贷」的闭环净赚并白得生息资产（杠杆套利）。
+          根因是洞天收益率远高于贷款利率，且还贷后玩家仍保留生息资产，
+          单纯调利率无法根除。
+          现改为「**允许**在贷款存续期购置/升级洞天，但**洞天产出被银行托管**，
+          还清贷款后方可收取」：
+            · 套利路径被切断——洞天收益无法用于还贷，玩家必须用其他途径
+              自筹本息，纯亏利息，无法净赚；
+            · 玩家仍可在资金周转困难时先用洞天顶一顶，还清贷款后立即恢复
+              收取，玩法自由度不受影响。
+        """
+        loan = await self.db.ext.get_active_loan(player.user_id)
+        if not loan:
+            return ""
+        return (
+            "\n⚠️ 你当前有未结清的贷款，洞天产出将被银行托管，"
+            "还清贷款（/还款）后方可收取。"
+        )
+
     async def get_user_blessed_land(self, user_id: str) -> Optional[Dict]:
         """获取用户洞天信息"""
         async with self.db.conn.execute(
@@ -39,7 +66,10 @@ class BlessedLandManager:
         """购买洞天"""
         if land_type not in BLESSED_LANDS:
             return False, "❌ 无效的洞天类型。可选：1-小洞天 2-中洞天 3-大洞天 4-福地 5-洞天福地"
-        
+
+        # 借贷套利防护：允许在贷款存续期购置，但产出将被托管至还清贷款
+        loan_notice = await self._get_active_loan_notice(player)
+
         # 检查是否已有洞天
         existing = await self.get_user_blessed_land(player.user_id)
         if existing:
@@ -75,14 +105,18 @@ class BlessedLandManager:
             f"{land_config.get('max_exp_per_hour', 5000)} 修为 /小时\n"
             f"━━━━━━━━━━━━━━━\n"
             f"使用 /洞天收取 领取产出"
+            f"{loan_notice}"
         )
-    
+
     async def upgrade_blessed_land(self, player: Player) -> Tuple[bool, str]:
         """升级洞天"""
         land = await self.get_user_blessed_land(player.user_id)
         if not land:
             return False, "❌ 你还没有洞天！使用 /购买洞天 <类型> 获取。"
-        
+
+        # 借贷套利防护：允许在贷款存续期升级，但产出将被托管至还清贷款
+        loan_notice = await self._get_active_loan_notice(player)
+
         land_type = land["land_type"]
         current_level = land["level"]
         config = BLESSED_LANDS.get(land_type, BLESSED_LANDS[1])
@@ -120,13 +154,26 @@ class BlessedLandManager:
             f"挂机产出：{new_gold_per_hour} 灵石 + "
             f"{config.get('max_exp_per_hour', 5000)} 修为 /小时\n"
             f"花费：{upgrade_cost:,} 灵石"
+            f"{loan_notice}"
         )
-    
+
     async def collect_income(self, player: Player) -> Tuple[bool, str]:
         """收取洞天产出"""
         land = await self.get_user_blessed_land(player.user_id)
         if not land:
             return False, "❌ 你还没有洞天！"
+
+        # 借贷套利防护：贷款未结清时冻结洞天收取（产出被银行托管）。
+        # 防止已用贷款购置洞天的玩家，把洞天被动收益装进口袋去还贷、
+        # 从而白得生息资产。玩家须先用其他途径还清贷款，之后洞天照常收取。
+        # （无活跃贷款者不受影响；收取上限 24h 使冻结期最多只损失溢出部分。）
+        if await self.db.ext.get_active_loan(player.user_id):
+            return False, (
+                "⚠️ 你当前有未结清的贷款，洞天产出已被银行托管，无法收取。\n"
+                "━━━━━━━━━━━━━━━\n"
+                "请先还清贷款（/还款），再收取洞天产出。\n"
+                "📌 防止「借贷款买洞天、用洞天收益还贷」的套利行为。"
+            )
         
         last_collect = land["last_collect_time"]
         now = int(time.time())
@@ -180,18 +227,27 @@ class BlessedLandManager:
                 "━━━━━━━━━━━━━━━\n"
                 "你还没有洞天！\n\n"
                 "可购买的洞天：\n"
-                "  1. 小洞天 - 10,000灵石\n"
-                "  2. 中洞天 - 50,000灵石\n"
-                "  3. 大洞天 - 200,000灵石\n"
-                "  4. 福地 - 500,000灵石\n"
-                "  5. 洞天福地 - 1,000,000灵石\n\n"
+                "  1. 小洞天 - 10,000灵石 (60灵石/时)\n"
+                "  2. 中洞天 - 50,000灵石 (300灵石/时)\n"
+                "  3. 大洞天 - 200,000灵石 (1,200灵石/时)\n"
+                "  4. 福地 - 500,000灵石 (3,000灵石/时)\n"
+                "  5. 洞天福地 - 1,000,000灵石 (6,000灵石/时)\n\n"
+                "各档约 7 天回本，产出最多累积 24 小时\n\n"
                 "💡 使用 /购买洞天 <编号>"
             )
-        
+
         now = int(time.time())
         hours_since = (now - land["last_collect_time"]) / 3600
         pending_gold = int(min(24, hours_since) * land["gold_per_hour"])
-        
+
+        # 贷款存续期提示：产出被托管，暂不可收取
+        escrow_hint = ""
+        if await self.db.ext.get_active_loan(user_id):
+            escrow_hint = (
+                f"⚠️ 你有未结清贷款，产出被银行托管暂不可收取"
+                f"（还清贷款后累计上限 24 小时）\n"
+            )
+
         return (
             f"🏔️ {land['land_name']} (Lv.{land['level']})\n"
             f"━━━━━━━━━━━━━━━\n"
@@ -199,6 +255,7 @@ class BlessedLandManager:
             f"挂机产出：{land['gold_per_hour']} 灵石 + "
             f"{BLESSED_LANDS.get(land['land_type'], BLESSED_LANDS[1]).get('max_exp_per_hour', 5000)} 修为 /小时\n"
             f"━━━━━━━━━━━━━━━\n"
+            f"{escrow_hint}"
             f"待收取：约 {pending_gold:,} 灵石\n"
             f"━━━━━━━━━━━━━━━\n"
             f"💡 /升级洞天 | /洞天收取"

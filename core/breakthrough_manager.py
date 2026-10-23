@@ -291,6 +291,7 @@ class BreakthroughManager:
                 # 玩家死亡 - 统一惩罚入口（宗门善后 + 级联删除所有关联数据）
                 penalty_mgr = getattr(self.db, "penalty_mgr", None)
                 sect_note = ""
+                debt_note = ""
                 if penalty_mgr is not None:
                     from .penalty_manager import PenaltyReason
                     ok, note = await penalty_mgr.punish(
@@ -300,8 +301,17 @@ class BreakthroughManager:
                         sect_note = note
                     else:
                         logger.error(f"[BreakthroughManager] 统一惩罚失败，兜底级联删除: {note}")
+                        # 兜底路径同样要处理债务继承（v3.2.7），否则「死亡即清债」漏洞重现
+                        from .penalty_manager import apply_death_debt
+                        debt_note = await apply_death_debt(
+                            self.db, player.user_id, PenaltyReason.BREAKTHROUGH_DEATH
+                        )
                         await self.db.delete_player_cascade(player.user_id)
                 else:
+                    from .penalty_manager import apply_death_debt, PenaltyReason
+                    debt_note = await apply_death_debt(
+                        self.db, player.user_id, PenaltyReason.BREAKTHROUGH_DEATH
+                    )
                     await self.db.delete_player_cascade(player.user_id)
 
                 death_msg = (
@@ -312,6 +322,7 @@ class BreakthroughManager:
                     f"你在突破【{next_level_name}】时走火入魔，身死道消...\n"
                     f"所有修为和装备化为虚无\n"
                     + (f"{sect_note}\n" if sect_note else "")
+                    + (f"{debt_note}\n" if debt_note else "")
                     + f"若想重新修仙，请使用'我要修仙'命令重新开始"
                 )
 

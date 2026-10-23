@@ -7,6 +7,8 @@
 import random
 import time
 from typing import Tuple, List, Optional, Dict
+from astrbot.api import logger
+
 from ..data.data_manager import DataBase
 from ..models_extended import Sect
 
@@ -22,9 +24,9 @@ SECT_ELIXIR_ROOMS = {
     0: {"name": "无丹房", "materials": 0, "stone": 0, "pills": [], "desc": "尚未建造丹房"},
     1: {"name": "一阶丹房", "materials": 200, "stone": 5000, "pills": ["聚气丹"], "desc": "可每日领取 1 颗聚气丹"},
     2: {"name": "二阶丹房", "materials": 500, "stone": 15000, "pills": ["聚气丹", "回元丹"], "desc": "可每日领取聚气丹 + 回元丹"},
-    3: {"name": "三阶丹房", "materials": 1200, "stone": 40000, "pills": ["聚气丹", "回元丹", "凝神丹"], "desc": "可每日领取聚气丹 + 回元丹 + 凝神丹"},
-    4: {"name": "四阶丹房", "materials": 3000, "stone": 100000, "pills": ["聚气丹", "回元丹", "凝神丹", "破障丹"], "desc": "可每日领取聚气丹 + 回元丹 + 凝神丹 + 破障丹"},
-    5: {"name": "五阶丹房", "materials": 8000, "stone": 250000, "pills": ["聚气丹", "回元丹", "凝神丹", "破障丹", "洗髓丹"], "desc": "丹房大成，弟子可领五味宗门丹药"},
+    3: {"name": "三阶丹房", "materials": 1200, "stone": 40000, "pills": ["聚气丹", "回元丹", "宗门凝神丹"], "desc": "可每日领取聚气丹 + 回元丹 + 宗门凝神丹"},
+    4: {"name": "四阶丹房", "materials": 3000, "stone": 100000, "pills": ["聚气丹", "回元丹", "宗门凝神丹", "破障丹"], "desc": "可每日领取聚气丹 + 回元丹 + 宗门凝神丹 + 破障丹"},
+    5: {"name": "五阶丹房", "materials": 8000, "stone": 250000, "pills": ["聚气丹", "回元丹", "宗门凝神丹", "破障丹", "宗门洗髓丹"], "desc": "丹房大成，弟子可领五味宗门丹药"},
 }
 MAX_ELIXIR_ROOM_LEVEL = 5
 
@@ -32,12 +34,16 @@ MAX_ELIXIR_ROOM_LEVEL = 5
 SECT_TASK_DAILY_LIMIT = 3
 
 # 宗门丹药效果（与丹药系统一致，用于展示说明）
+# ⚠️ 本表是对玩家的对外承诺，必须与 config/utility_pills.json 中的真实效果严格一致。
+# 注：「凝神丹」原文案为「会心率 +3%」，但当前版本无「丹药 → 会心率」的实现链路，
+#     故改用宗门专属变体「宗门凝神丹」（精神力 +5%），文案同步调整，详见
+#     docs/design/sect_elixir_pills.md 的 BLOCKED 项。
 SECT_ELIXIR_EFFECTS = {
     "聚气丹": "闭关修炼速度 +10%",
     "回元丹": "气血与灵气上限 +5%",
-    "凝神丹": "会心率 +3%",
+    "宗门凝神丹": "精神力 +5%",
     "破障丹": "突破成功率 +5%",
-    "洗髓丹": "全部属性 +2%",
+    "宗门洗髓丹": "全部属性 +2%",
 }
 
 
@@ -65,7 +71,44 @@ class SectManager:
     def __init__(self, db: DataBase, config_manager=None):
         self.db = db
         self.config = config_manager.sect_config if config_manager else {}
+        self.config_manager = config_manager
+
+    def _is_pill_defined(self, pill_name: str) -> bool:
+        """校验丹药在丹药系统中确实存在（存在才发放，避免发出「用不了」的幽灵丹药）
+
+        只认 PillManager.get_pill_by_name 会查询的三个配置源：
+        pills.json（破境丹）/ exp_pills.json（修为丹）/ utility_pills.json（功能丹）。
+        """
+        config_manager = self.config_manager
+        if config_manager is None:
+            logger.warning(
+                f"[宗门丹房] 无配置管理器，无法校验丹药【{pill_name}】是否存在，按已定义处理"
+            )
+            return True
+        return (
+            pill_name in getattr(config_manager, "pills_data", {})
+            or pill_name in getattr(config_manager, "exp_pills_data", {})
+            or pill_name in getattr(config_manager, "utility_pills_data", {})
+        )
     
+    def _get_pill_level_requirement(self, pill_name: str) -> int:
+        """取丹药的境界门槛（与 PillManager.use_pill 的校验同源），取不到按 0 处理
+
+        join_sect 没有境界门槛，若发放时不校验，境界不足的弟子会领到丹药
+        却在服用时被判「境界不足」——即本次要根除的「领了用不了」问题。
+        """
+        config_manager = self.config_manager
+        if config_manager is None:
+            return 0
+        for attr in ("pills_data", "exp_pills_data", "utility_pills_data"):
+            data = getattr(config_manager, attr, None) or {}
+            if pill_name in data:
+                try:
+                    return int(data[pill_name].get("required_level_index", 0) or 0)
+                except (TypeError, ValueError, AttributeError):
+                    return 0
+        return 0
+
     def _validate_sect_name(self, name: str) -> Tuple[bool, str]:
         """验证宗门名称"""
         if len(name) < SECT_NAME_MIN_LENGTH or len(name) > SECT_NAME_MAX_LENGTH:
@@ -680,9 +723,46 @@ class SectManager:
         pills = SECT_ELIXIR_ROOMS[level]["pills"]
         inventory = player.get_pills_inventory()
         gained = []
+        skipped = []
+        level_blocked = []
         for pill in pills:
+            # 防御性校验一：丹药必须在丹药系统中有定义，否则跳过并记日志，
+            # 避免再次出现「领到了但服用时提示配置不存在」的幽灵丹药
+            if not self._is_pill_defined(pill):
+                logger.warning(
+                    f"[宗门丹房] 玩家 {user_id} 领取丹药失败："
+                    f"【{pill}】在丹药系统中无配置（宗门 {player.sect_id} 丹房 {level} 阶），已跳过发放"
+                )
+                skipped.append(pill)
+                continue
+            # 防御性校验二：境界不足的丹药不发放。
+            # join_sect 无境界门槛，若不过滤，低境界弟子会领到却用不了。
+            required_level = self._get_pill_level_requirement(pill)
+            if player.level_index < required_level:
+                level_blocked.append((pill, required_level))
+                continue
             inventory[pill] = inventory.get(pill, 0) + 1
             gained.append(pill)
+
+        if not gained and level_blocked:
+            # 全因境界不足发不出去：不消耗每日领取机会，让弟子到境界后还能领
+            blocked_lines = "\n".join(f"  · {p}" for p, _ in level_blocked)
+            return False, (
+                "❌ 你当前的境界还不足以领取宗门丹药。\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"{blocked_lines}\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"💡 提升境界后再来领取（本次不消耗每日领取机会）"
+            )
+
+        if not gained:
+            # 一枚都发不出去时不置位每日标记，玩家修复配置后可重新领取
+            return False, (
+                "❌ 宗门丹房配置的丹药当前均不可用（配置缺失），本次未发放。\n"
+                f"💡 缺失丹药：{'、'.join(skipped) if skipped else '未知'}\n"
+                "💡 请联系服务器管理员检查丹药配置。"
+            )
+
         player.set_pills_inventory(inventory)
 
         player.sect_elixir_get = 1
@@ -691,13 +771,23 @@ class SectManager:
         effect_lines = "\n".join(
             f"  · {p} —— {SECT_ELIXIR_EFFECTS.get(p, '')}" for p in gained
         )
-        return True, (
+        message = (
             f"🎁 领取宗门丹药成功！\n"
             f"━━━━━━━━━━━━━━━\n"
             f"{effect_lines}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"💡 使用「服用丹药 <名称>」生效"
         )
+        if skipped:
+            message += f"\n⚠️ 以下丹药配置缺失已跳过：{'、'.join(skipped)}"
+        if level_blocked:
+            blocked_lines = "\n".join(f"  · {p}（需更高境界）" for p, _ in level_blocked)
+            message += (
+                f"\n⚠️ 以下丹药境界不足，暂未发放：\n"
+                f"{blocked_lines}\n"
+                f"💡 提升境界后再来服用"
+            )
+        return True, message
 
     async def handle_owner_death(self, sect_id: int, dead_owner_id: str) -> Tuple[bool, str]:
         """处理玩家因死亡/重修离开宗门时的宗门善后

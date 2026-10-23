@@ -275,6 +275,72 @@
       }
     }
   },
+  "BANK": {
+    "description": "灵石银行配置",
+    "type": "object",
+    "items": {
+      "DAILY_INTEREST_RATE": {
+        "description": "存款日利率",
+        "type": "float",
+        "default": 0.001,
+        "hint": "银行存款的每日利率（0.001 表示 0.1%），按复利计算。"
+      },
+      "MAX_DEPOSIT": {
+        "description": "存款上限",
+        "type": "int",
+        "default": 10000000,
+        "hint": "单个账户的存款余额上限，超出后无法继续存入。"
+      },
+      "LOAN_INTEREST_RATE": {
+        "description": "普通贷款日利率",
+        "type": "float",
+        "default": 0.005,
+        "hint": "普通贷款的每日利率（0.005 表示 0.5%）。"
+      },
+      "LOAN_DURATION_DAYS": {
+        "description": "普通贷款期限（天）",
+        "type": "int",
+        "default": 7,
+        "hint": "普通贷款的还款期限天数，逾期将被银行追杀致死。"
+      },
+      "MAX_LOAN_AMOUNT": {
+        "description": "单笔贷款上限",
+        "type": "int",
+        "default": 1000000,
+        "hint": "单笔可借贷款的最大金额。"
+      },
+      "MIN_LOAN_AMOUNT": {
+        "description": "单笔贷款下限",
+        "type": "int",
+        "default": 1000,
+        "hint": "单笔可借贷款的最小金额。"
+      },
+      "BREAKTHROUGH_LOAN_RATE": {
+        "description": "突破贷款日利率",
+        "type": "float",
+        "default": 0.008,
+        "hint": "突破贷款的每日利率（0.008 表示 0.8%），利率高于普通贷款。"
+      },
+      "BREAKTHROUGH_LOAN_DURATION": {
+        "description": "突破贷款期限（天）",
+        "type": "int",
+        "default": 3,
+        "hint": "突破贷款的还款期限天数。"
+      },
+      "DEBT_INHERIT_MAX": {
+        "description": "债务继承次数上限",
+        "type": "int",
+        "default": 3,
+        "hint": "玩家死亡时未还清的贷款会随其转世继承到新身份上。最多继承这么多次；超过上限后的下一次死亡，债务将被强制免除，给玩家一条彻底出坑的路。设为 0 表示债务从不继承（等同旧版：死亡即清债）。"
+      },
+      "DEBT_INHERIT_GRACE_DAYS": {
+        "description": "继承债务宽限期（天）",
+        "type": "int",
+        "default": 7,
+        "hint": "玩家转世重开后，继承回来的贷款给予的宽限天数。宽限期内不额外计息（固定免息），逾期仍会被银行追杀致死。"
+      }
+    }
+  },
   "FILES": {
     "description": "文件路径配置",
     "type": "object",
