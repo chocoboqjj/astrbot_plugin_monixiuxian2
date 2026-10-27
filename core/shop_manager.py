@@ -289,11 +289,20 @@ class ShopManager:
         return all_pills
 
     def get_weapons_for_display(self, count: int) -> List[Dict]:
-        """获取武器列表用于器阁展示"""
+        """获取武器与防具列表用于器阁展示
+
+        ⚠️ v3.3.8：此前器阁只铺 weapons.json（全是武器），
+        防具（items.json 里 type=法器 且 subtype=防具）没有货架 ⇒ 玩家买不到防具。
+        此处把防具一并纳入器阁（type='armor'，购买链路本就支持 armor）。
+        """
         all_weapons = []
         for weapon in self.config_manager.weapons_data.values():
             if weapon.get('price', 0) > 0:
                 all_weapons.append({'name': weapon['name'], 'type': 'weapon', 'price': weapon['price'], 'rank': weapon.get('rank', '凡品'), 'data': weapon})
+        for item in self.config_manager.items_data.values():
+            if item.get('type') == '法器' and item.get('subtype') == '防具':
+                if item.get('price', 0) > 0:
+                    all_weapons.append({'name': item['name'], 'type': 'armor', 'price': item['price'], 'rank': item.get('rank', '凡品'), 'data': item})
         return all_weapons
 
     def get_all_items_for_display(self, count: int) -> List[Dict]:

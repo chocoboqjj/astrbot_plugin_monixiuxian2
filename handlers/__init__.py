@@ -29,6 +29,9 @@ from .spirit_eye_handlers import SpiritEyeHandlers
 from .calamity_handler import CalamityHandlers
 # v3.3.3：炼器系统
 from .forge_handlers import ForgeHandlers
+# v3.3.8：功法残页合成 + 投毒系统
+from .technique_handlers import TechniqueHandlers
+from .poison_handlers import PoisonHandlers
 
 __all__ = [
     "PlayerHandler",
@@ -58,5 +61,8 @@ __all__ = [
     # v3.2.9
     "CalamityHandlers",
     # v3.3.3
-    "ForgeHandlers"
+    "ForgeHandlers",
+    # v3.3.8
+    "TechniqueHandlers",
+    "PoisonHandlers",
 ]

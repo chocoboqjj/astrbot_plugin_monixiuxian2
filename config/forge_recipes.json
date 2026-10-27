@@ -4,55 +4,143 @@
         "name": "青铜剑",
         "level_required": 0,
         "materials": {"精铁": 3, "灵石": 200},
-        "success_rate": 90
+        "success_rate": 90,
+        "desc": "凡品·剑：以精铁锻打而成，炼气期修士的入门兵器。"
     },
     {
         "id": 2,
         "name": "精钢剑",
         "level_required": 0,
         "materials": {"精铁": 6, "灵石": 400},
-        "success_rate": 85
+        "success_rate": 85,
+        "desc": "凡品·剑：比青铜剑更锋利坚韧。"
     },
     {
         "id": 3,
-        "name": "碧水灵剑",
-        "level_required": 10,
-        "materials": {"精铁": 8, "星辰石": 3, "灵兽毛皮": 2, "灵石": 2000},
-        "success_rate": 75
+        "name": "皮甲",
+        "level_required": 0,
+        "materials": {"灵兽毛皮": 3, "精铁": 2, "灵石": 300},
+        "success_rate": 90,
+        "desc": "凡品·防具：鞣制兽皮缝制，防护尚可。"
     },
     {
         "id": 4,
-        "name": "赤焰灵剑",
+        "name": "碧水灵剑",
         "level_required": 10,
         "materials": {"精铁": 8, "星辰石": 3, "灵兽毛皮": 2, "灵石": 2000},
-        "success_rate": 75
+        "success_rate": 75,
+        "desc": "灵品·剑：蕴含水灵气，适合筑基期修士。"
     },
     {
         "id": 5,
-        "name": "寒冰地剑",
-        "level_required": 12,
-        "materials": {"星辰石": 5, "灵兽内丹": 2, "天材地宝": 1, "灵石": 5000},
-        "success_rate": 65
+        "name": "赤焰灵剑",
+        "level_required": 10,
+        "materials": {"精铁": 8, "星辰石": 3, "灵兽毛皮": 2, "灵石": 2000},
+        "success_rate": 75,
+        "desc": "灵品·剑：剑身赤红，挥舞间似有烈焰。"
     },
     {
         "id": 6,
-        "name": "青云天剑",
-        "level_required": 13,
-        "materials": {"星辰石": 8, "灵兽内丹": 3, "天材地宝": 2, "灵石": 10000},
-        "success_rate": 55
+        "name": "灵木护心镜",
+        "level_required": 10,
+        "materials": {"精铁": 5, "星辰石": 2, "灵兽毛皮": 3, "灵石": 2000},
+        "success_rate": 75,
+        "desc": "灵品·防具：千年灵木所制，可挡下致命一击。"
     },
     {
         "id": 7,
-        "name": "紫霄皇剑",
-        "level_required": 16,
-        "materials": {"星辰石": 12, "灵兽内丹": 5, "天材地宝": 4, "灵石": 25000},
-        "success_rate": 45
+        "name": "寒冰地剑",
+        "level_required": 12,
+        "materials": {"星辰石": 5, "灵兽内丹": 2, "天材地宝": 1, "灵石": 5000},
+        "success_rate": 65,
+        "desc": "地品·剑：寒气凛冽，一剑出则冰封百里。"
     },
     {
         "id": 8,
+        "name": "玄龟软甲",
+        "level_required": 12,
+        "materials": {"星辰石": 6, "灵兽内丹": 2, "天材地宝": 1, "灵石": 6000},
+        "success_rate": 65,
+        "desc": "地品·防具：玄龟甲壳鞣成，坚韧而灵活。"
+    },
+    {
+        "id": 9,
+        "name": "青云天剑",
+        "level_required": 13,
+        "materials": {"星辰石": 8, "灵兽内丹": 3, "天材地宝": 2, "灵石": 10000},
+        "success_rate": 55,
+        "desc": "天品·剑：青云直上，剑气冲霄。"
+    },
+    {
+        "id": 10,
+        "name": "流云法袍",
+        "level_required": 13,
+        "materials": {"星辰石": 10, "灵兽内丹": 4, "天材地宝": 2, "灵石": 15000},
+        "success_rate": 55,
+        "desc": "天品·防具：云霞凝成，能卸去大半来袭法力。"
+    },
+    {
+        "id": 11,
+        "name": "紫霄皇剑",
+        "level_required": 16,
+        "materials": {"星辰石": 12, "灵兽内丹": 5, "天材地宝": 4, "灵石": 25000},
+        "success_rate": 45,
+        "desc": "皇品·剑：紫气东来，皇者之气。"
+    },
+    {
+        "id": 12,
+        "name": "金刚战铠",
+        "level_required": 16,
+        "materials": {"星辰石": 14, "灵兽内丹": 6, "天材地宝": 5, "灵石": 60000},
+        "success_rate": 40,
+        "desc": "皇品·防具：金刚之力淬炼，坚不可摧。"
+    },
+    {
+        "id": 13,
         "name": "九霄帝剑",
-        "level_required": 22,
+        "level_required": 19,
         "materials": {"紫金沙": 5, "天材地宝": 8, "灵兽内丹": 8, "灵石": 60000},
-        "success_rate": 35
+        "success_rate": 35,
+        "desc": "圣品·剑：帝者之剑，威震九霄。"
+    },
+    {
+        "id": 14,
+        "name": "不动明王铠",
+        "level_required": 19,
+        "materials": {"紫金沙": 5, "天材地宝": 8, "灵兽内丹": 8, "灵石": 60000},
+        "success_rate": 35,
+        "desc": "圣品·防具：承载不动明王之力，万法难破。"
+    },
+    {
+        "id": 15,
+        "name": "混沌玄甲",
+        "level_required": 22,
+        "materials": {"紫金沙": 8, "混沌精华": 2, "天材地宝": 12, "灵兽内丹": 12, "灵石": 200000},
+        "success_rate": 30,
+        "desc": "帝品·防具：混沌本源铸成，返璞归元。"
+    },
+    {
+        "id": 16,
+        "name": "诸天战铠",
+        "level_required": 25,
+        "materials": {"紫金沙": 12, "混沌精华": 3, "天材地宝": 16, "神兽之骨": 1, "灵石": 500000},
+        "success_rate": 25,
+        "desc": "道品·防具：蕴含大道法则，一击可裂苍穹。"
+    },
+    {
+        "id": 17,
+        "name": "鸿蒙道袍",
+        "level_required": 28,
+        "materials": {"紫金沙": 18, "混沌精华": 5, "天材地宝": 20, "神兽之骨": 2, "仙器碎片": 3, "灵石": 1200000},
+        "success_rate": 20,
+        "desc": "仙品·防具：鸿蒙初开之气织成，仙人之姿。"
+    },
+    {
+        "id": 18,
+        "name": "混元金袍",
+        "level_required": 31,
+        "materials": {"紫金沙": 25, "混沌精华": 8, "天材地宝": 30, "神兽之骨": 3, "仙器碎片": 6, "灵石": 3000000},
+        "success_rate": 15,
+        "desc": "混元先天·防具：万法不侵。"
     }
 ]

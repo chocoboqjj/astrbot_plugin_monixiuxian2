@@ -5,7 +5,7 @@ from ..data import DataBase
 from ..core import PillManager
 from ..models import Player
 from ..config_manager import ConfigManager
-from .utils import player_required
+from .utils import player_required, parse_counted_args
 
 CMD_USE_PILL = "服用丹药"
 CMD_SHOW_PILLS = "丹药背包"
@@ -44,7 +44,7 @@ class PillHandler:
         Args:
             player: 玩家对象
             event: 事件对象
-            pill_name: 丹药名称
+            pill_name: 丹药名称（可带数量，如「三品凝神增益丹 3」）
         """
         # 检查是否提供了丹药名称
         if not pill_name or pill_name.strip() == "":
@@ -55,13 +55,17 @@ class PillHandler:
             )
             return
 
+        # ⚠️ 宿主的 CommandFilter 对 str 参数只取第一个 token，
+        #    `/服用丹药 炼气丹 3` 传进来的是 "炼气丹"（数量被丢弃）
+        #    ⇒ 必须从原始消息重新解析「名称 + 数量」。
+        pill_name, count = parse_counted_args(event, pill_name, [CMD_USE_PILL], 1)
         pill_name = pill_name.strip()
 
         # 先更新临时效果（移除过期的）
         await self.pill_manager.update_temporary_effects(player)
 
-        # 使用丹药
-        success, message = await self.pill_manager.use_pill(player, pill_name)
+        # 使用丹药（支持一次服用多枚）
+        success, message = await self.pill_manager.use_pill(player, pill_name, count)
 
         if success:
             yield event.plain_result(message)

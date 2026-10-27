@@ -16,14 +16,16 @@ from .handlers import (
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
-    CalamityHandlers, ForgeHandlers
+    CalamityHandlers, ForgeHandlers,
+    TechniqueHandlers, PoisonHandlers
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager, 
     RankingManager, AdventureManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
     BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
-    CalamityManager, ForgeManager
+    CalamityManager, ForgeManager,
+    TechniqueManager, PoisonManager
 )
 
 
@@ -124,6 +126,14 @@ CMD_ALCHEMY_CRAFT = "炼丹"
 CMD_FORGE_RECIPES = "炼器配方"
 CMD_FORGE = "炼器"
 CMD_REFINE = "精炼"
+
+# 功法合成指令（v3.3.8：功法残页 → 随机功法）
+CMD_TECHNIQUE_RECIPES = "功法合成"
+CMD_CRAFT_TECHNIQUE = "合成功法"
+
+# 投毒指令（v3.3.8：减益丹暗算他人，有概率被发现受惩罚）
+CMD_POISON_INFO = "投毒手册"
+CMD_POISON = "投毒"
 
 # 传承系统指令
 CMD_IMPART_INFO = "传承信息"
@@ -312,6 +322,12 @@ class XiuXianPlugin(Star):
         self.calamity_handlers = CalamityHandlers(self.db, self.calamity_mgr)
         # 挂到 db 上，方便其他模块取用（避免层层透传参数）
         self.db.calamity_mgr = self.calamity_mgr
+
+        # v3.3.8：功法残页合成 + 投毒系统
+        self.technique_mgr = TechniqueManager(self.db, self.config_manager, self.storage_ring_mgr)
+        self.technique_handlers = TechniqueHandlers(self.db, self.technique_mgr)
+        self.poison_mgr = PoisonManager(self.db, self.config_manager)
+        self.poison_handlers = PoisonHandlers(self.db, self.poison_mgr)
         
         self.boss_task = None # Boss生成任务
         self.loan_check_task = None # 贷款逾期检查任务
@@ -1303,6 +1319,32 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_refine(self, event: AstrMessageEvent, item_name: str = ""):
         async for r in self.forge_handlers.handle_refine(event, item_name):
+            yield r
+
+    # ===== 功法合成指令（v3.3.8：功法残页 → 随机功法） =====
+    @filter.command(CMD_TECHNIQUE_RECIPES, "查看功法合成配方")
+    @require_whitelist
+    async def handle_technique_recipes(self, event: AstrMessageEvent):
+        async for r in self.technique_handlers.handle_technique_recipes(event):
+            yield r
+
+    @filter.command(CMD_CRAFT_TECHNIQUE, "消耗功法残页合成功法")
+    @require_whitelist
+    async def handle_craft_technique(self, event: AstrMessageEvent, pages: int = 1):
+        async for r in self.technique_handlers.handle_craft_technique(event, pages):
+            yield r
+
+    # ===== 投毒指令（v3.3.8） =====
+    @filter.command(CMD_POISON_INFO, "查看投毒手册与可用毒丹")
+    @require_whitelist
+    async def handle_poison_info(self, event: AstrMessageEvent):
+        async for r in self.poison_handlers.handle_poison_info(event):
+            yield r
+
+    @filter.command(CMD_POISON, "投毒暗算他人（有风险）")
+    @require_whitelist
+    async def handle_poison(self, event: AstrMessageEvent, args: str = ""):
+        async for r in self.poison_handlers.handle_poison(event, args):
             yield r
 
     # ===== 传承指令 =====

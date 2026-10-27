@@ -20,6 +20,9 @@ from .spirit_eye_manager import SpiritEyeManager
 from .calamity_manager import CalamityManager
 # v3.3.3：炼器系统
 from .forge_manager import ForgeManager
+# v3.3.8：功法残页合成 + 投毒系统
+from .technique_manager import TechniqueManager
+from .poison_manager import PoisonManager
 
 __all__ = [
     "CombatManager",
@@ -42,5 +45,8 @@ __all__ = [
     # v3.2.9
     "CalamityManager",
     # v3.3.3
-    "ForgeManager"
+    "ForgeManager",
+    # v3.3.8
+    "TechniqueManager",
+    "PoisonManager",
 ]

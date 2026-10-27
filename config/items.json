@@ -553,56 +553,64 @@
         "type": "材料",
         "rank": "凡品",
         "description": "灵石碎裂后的残渣，可提炼灵气或回炉重铸。",
-        "price": 60, "shop_weight": 1000
+        "price": 60,
+        "shop_weight": 1000
     },
     "2016": {
         "name": "灵兽毛皮",
         "type": "材料",
         "rank": "凡品",
         "description": "灵兽褪下的毛皮，坚韧异常，是炼制防具的底材。",
-        "price": 150, "shop_weight": 1000
+        "price": 150,
+        "shop_weight": 1000
     },
     "2017": {
         "name": "妖兽精血",
         "type": "材料",
         "rank": "凡品",
         "description": "妖兽精血，蕴含狂暴生命力，可作炼体与炼丹材料。",
-        "price": 120, "shop_weight": 1000
+        "price": 120,
+        "shop_weight": 1000
     },
     "2018": {
         "name": "星辰石",
         "type": "材料",
         "rank": "珍品",
         "description": "陨星碎片凝练的星辰之力结晶，可赋予法器星辰属性。",
-        "price": 800, "shop_weight": 100
+        "price": 800,
+        "shop_weight": 100
     },
     "2019": {
         "name": "功法残页",
         "type": "材料",
         "rank": "珍品",
         "description": "古老功法散佚的残页，集齐可窥探无上秘法。",
-        "price": 1500, "shop_weight": 50
+        "price": 1500,
+        "shop_weight": 50
     },
     "2020": {
         "name": "灵兽内丹",
         "type": "材料",
         "rank": "珍品",
         "description": "灵兽一身灵力的结晶，蕴含磅礴妖力。",
-        "price": 2000, "shop_weight": 30
+        "price": 2000,
+        "shop_weight": 30
     },
     "2021": {
         "name": "天材地宝",
         "type": "材料",
         "rank": "珍品",
         "description": "天地孕育的奇物，万法皆可用之，极为珍贵。",
-        "price": 2500, "shop_weight": 20
+        "price": 2500,
+        "shop_weight": 20
     },
     "2022": {
         "name": "秘境精华",
         "type": "材料",
         "rank": "圣品",
         "description": "秘境核心凝聚的天地精华，极为稀有。",
-        "price": 3000, "shop_weight": 10
+        "price": 3000,
+        "shop_weight": 10
     },
     "3001": {
         "name": "青锋剑",
@@ -807,5 +815,321 @@
         "description": "魔道无上功法，吞噬万物本源，禁忌的存在。",
         "price": 6666666,
         "shop_weight": 20
+    },
+    "2023": {
+        "name": "混沌精华",
+        "type": "材料",
+        "rank": "仙品",
+        "description": "天地混沌初开时诞生的一缕本源之气，蕴含开辟世界的伟力。",
+        "price": 8000,
+        "shop_weight": 5
+    },
+    "2024": {
+        "name": "神兽之骨",
+        "type": "材料",
+        "rank": "仙品",
+        "description": "上古神兽陨落后遗留的骨骼，蕴含其生前的一缕神性。",
+        "price": 12000,
+        "shop_weight": 3
+    },
+    "2025": {
+        "name": "远古秘籍",
+        "type": "材料",
+        "rank": "圣品",
+        "description": "自远古时代流传下来的残卷，记载着失传的秘法。",
+        "price": 6000,
+        "shop_weight": 5
+    },
+    "2026": {
+        "name": "仙器碎片",
+        "type": "材料",
+        "rank": "圣品",
+        "description": "仙兵崩解后残留的碎片，仍有锋芒隐现。",
+        "price": 5000,
+        "shop_weight": 8
+    },
+    "3011": {
+        "name": "皮甲",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "凡品",
+        "required_level_index": 0,
+        "description": "以鞣制兽皮缝制的轻甲，适合初入仙途的散修。",
+        "price": 600,
+        "equip_effects": {
+            "defense": 8,
+            "max_hp": 20
+        },
+        "shop_weight": 1000
+    },
+    "3012": {
+        "name": "灵木护心镜",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "灵品",
+        "required_level_index": 10,
+        "description": "以千年灵木炼制的护心镜，可挡下致命一击。",
+        "price": 5000,
+        "equip_effects": {
+            "defense": 30,
+            "max_hp": 60
+        },
+        "shop_weight": 100
+    },
+    "3013": {
+        "name": "玄龟软甲",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "地品",
+        "required_level_index": 12,
+        "description": "玄龟甲壳鞣成的软甲，坚韧而灵活。",
+        "price": 30000,
+        "equip_effects": {
+            "defense": 70,
+            "max_hp": 120
+        },
+        "shop_weight": 60
+    },
+    "3014": {
+        "name": "流云法袍",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "天品",
+        "required_level_index": 13,
+        "description": "云霞凝成的法袍，卸去大半来袭法力。",
+        "price": 120000,
+        "equip_effects": {
+            "defense": 150,
+            "max_hp": 250
+        },
+        "shop_weight": 30
+    },
+    "3015": {
+        "name": "金刚战铠",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "皇品",
+        "required_level_index": 16,
+        "description": "以金刚之力淬炼的战铠，坚不可摧。",
+        "price": 400000,
+        "equip_effects": {
+            "defense": 280,
+            "max_hp": 450
+        },
+        "shop_weight": 15
+    },
+    "3016": {
+        "name": "不动明王铠",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "圣品",
+        "required_level_index": 19,
+        "description": "承载不动明王之力的圣铠，万法难破。",
+        "price": 1200000,
+        "equip_effects": {
+            "defense": 520,
+            "max_hp": 800
+        },
+        "shop_weight": 8
+    },
+    "3017": {
+        "name": "混沌玄甲",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "帝品",
+        "required_level_index": 22,
+        "description": "以混沌本源铸成的玄甲，返璞归元。",
+        "price": 3000000,
+        "equip_effects": {
+            "defense": 900,
+            "max_hp": 1500
+        },
+        "shop_weight": 4
+    },
+    "3018": {
+        "name": "诸天战铠",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "道品",
+        "required_level_index": 25,
+        "description": "蕴含大道法则的战铠，一击可裂苍穹。",
+        "price": 8000000,
+        "equip_effects": {
+            "defense": 1600,
+            "max_hp": 2600
+        },
+        "shop_weight": 2
+    },
+    "3019": {
+        "name": "鸿蒙道袍",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "仙品",
+        "required_level_index": 28,
+        "description": "开天辟地之初的鸿蒙之气织成，仙人之姿。",
+        "price": 20000000,
+        "equip_effects": {
+            "defense": 3000,
+            "max_hp": 5000
+        },
+        "shop_weight": 1
+    },
+    "3020": {
+        "name": "混元金袍",
+        "type": "法器",
+        "subtype": "防具",
+        "rank": "混元先天",
+        "required_level_index": 31,
+        "description": "混元先天之宝，万法不侵。",
+        "price": 50000000,
+        "equip_effects": {
+            "defense": 6000,
+            "max_hp": 10000
+        },
+        "shop_weight": 1
+    },
+    "4011": {
+        "name": "引气诀",
+        "type": "功法",
+        "rank": "灵品",
+        "required_level_index": 3,
+        "description": "引天地灵气入体的入门法门，修炼事半功倍。",
+        "price": 3000,
+        "shop_weight": 600
+    },
+    "4012": {
+        "name": "玄元心法",
+        "type": "功法",
+        "rank": "灵品",
+        "required_level_index": 6,
+        "description": "以玄元固本培元，根基更为扎实。",
+        "price": 5000,
+        "shop_weight": 500
+    },
+    "4013": {
+        "name": "明窍真解",
+        "type": "功法",
+        "rank": "灵品",
+        "required_level_index": 10,
+        "description": "开窍通明，感知敏锐，悟性大增。",
+        "price": 8000,
+        "shop_weight": 400
+    },
+    "4014": {
+        "name": "紫府真传",
+        "type": "功法",
+        "rank": "地品",
+        "required_level_index": 12,
+        "description": "直指紫府筑基，修行一日千里。",
+        "price": 20000,
+        "shop_weight": 200
+    },
+    "4015": {
+        "name": "龙虎交泰法",
+        "type": "功法",
+        "rank": "地品",
+        "required_level_index": 14,
+        "description": "龙虎交媾，刚柔并济，可壮肉身。",
+        "price": 35000,
+        "shop_weight": 160
+    },
+    "4016": {
+        "name": "天罡地煞篇",
+        "type": "功法",
+        "rank": "地品",
+        "required_level_index": 15,
+        "description": "天罡护体，地煞随行，护法于无形。",
+        "price": 55000,
+        "shop_weight": 120
+    },
+    "4017": {
+        "name": "太清道德经",
+        "type": "功法",
+        "rank": "天品",
+        "required_level_index": 16,
+        "description": "太清无为，返璞归真，清心寡欲。",
+        "price": 120000,
+        "shop_weight": 80
+    },
+    "4018": {
+        "name": "焚海真经",
+        "type": "功法",
+        "rank": "天品",
+        "required_level_index": 18,
+        "description": "焚尽四海，霸道绝伦，杀伐果决。",
+        "price": 180000,
+        "shop_weight": 60
+    },
+    "4019": {
+        "name": "九转玄功",
+        "type": "功法",
+        "rank": "皇品",
+        "required_level_index": 19,
+        "description": "九转之功，脱胎换骨，寿元大增。",
+        "price": 400000,
+        "shop_weight": 30
+    },
+    "4020": {
+        "name": "万相归一论",
+        "type": "功法",
+        "rank": "皇品",
+        "required_level_index": 20,
+        "description": "万相归一，一法统御万法。",
+        "price": 600000,
+        "shop_weight": 20
+    },
+    "4021": {
+        "name": "罗睺魔功",
+        "type": "功法",
+        "rank": "皇品",
+        "required_level_index": 21,
+        "description": "罗睺魔祖传承，霸道绝伦亦凶险异常。",
+        "price": 700000,
+        "shop_weight": 15
+    },
+    "4022": {
+        "name": "诸天无上法",
+        "type": "功法",
+        "rank": "圣品",
+        "required_level_index": 22,
+        "description": "诸天之上再无上法，可窥大道本源。",
+        "price": 1500000,
+        "shop_weight": 8
+    },
+    "4023": {
+        "name": "混沌开天诀",
+        "type": "功法",
+        "rank": "帝品",
+        "required_level_index": 25,
+        "description": "以混沌开天，返归太初。",
+        "price": 4000000,
+        "shop_weight": 5
+    },
+    "4024": {
+        "name": "太上忘情录",
+        "type": "功法",
+        "rank": "道品",
+        "required_level_index": 28,
+        "description": "忘情绝爱，方证大道。",
+        "price": 9000000,
+        "shop_weight": 3
+    },
+    "4025": {
+        "name": "鸿蒙紫气诀",
+        "type": "功法",
+        "rank": "仙品",
+        "required_level_index": 31,
+        "description": "吸纳鸿蒙紫气，触及大道之巅。",
+        "price": 20000000,
+        "shop_weight": 2
+    },
+    "4026": {
+        "name": "混元无极功",
+        "type": "功法",
+        "rank": "混元先天",
+        "required_level_index": 34,
+        "description": "混元无极，超越万法之外。",
+        "price": 50000000,
+        "shop_weight": 1
     }
 }

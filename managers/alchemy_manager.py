@@ -35,7 +35,7 @@ class AlchemyManager:
     def _normalize_recipe(self, recipe_id: int, recipe: Dict) -> Dict:
         """标准化配方字段，兼容不同格式的配置"""
         name = recipe.get("name", f"丹药{recipe_id}")
-        
+
         desc = recipe.get("desc", None)
         if not desc and self.config_manager:
             pill_config = self._get_pill_config_by_name(name)
@@ -43,15 +43,71 @@ class AlchemyManager:
                 desc = self._generate_pill_desc(pill_config)
         if not desc:
             desc = "丹药效果"
-        
+
+        # ⚠️ v3.3.8：破境丹的「可炼境界上限」——
+        #    玩家只能炼制不高于自身所在大境界的下一颗破境丹。
+        #    例：筑基后期（level 12）最高可炼「结丹丹」（target 13）；
+        #        金丹中期（level 14）最高可炼「温丹丹」（target 15）。
+        #    规则：target_level_index <= 玩家当前 level_index + 1。
+        target_level = recipe.get("target_level_index")
+        if target_level is None and self.config_manager:
+            pill_cfg = self._get_pill_config_by_name(name)
+            if pill_cfg:
+                target_level = pill_cfg.get("target_level_index")
+
         return {
             "id": recipe.get("id", recipe_id),
             "name": name,
             "level_required": recipe.get("level_required", recipe.get("level", 0)),
             "materials": recipe.get("materials", recipe.get("cost", {})),
             "success_rate": recipe.get("success_rate", recipe.get("success", 50)),
-            "desc": desc
+            "desc": desc,
+            "target_level_index": target_level,
+            "is_breakthrough": bool(target_level is not None),
         }
+
+    def _check_breakthrough_limit(self, player: Player, recipe: Dict) -> Tuple[bool, str]:
+        """破境丹的境界限制校验。
+
+        规则（用户诉求：「筑基后期最高可炼结丹丹，金丹中期最高可炼温丹丹」）：
+        只能炼制「目标境界 ≤ 自身当前境界 + 1」的破境丹。
+
+        Returns:
+            (是否允许, 错误文案)
+        """
+        if not recipe.get("is_breakthrough"):
+            return True, ""
+
+        target = recipe.get("target_level_index")
+        if target is None:
+            return True, ""
+
+        allowed = player.level_index + 1
+        if target > allowed:
+            target_name = self._level_name(target)
+            allowed_name = self._level_name(allowed)
+            return False, (
+                f"❌ 你的修为不足以炼制【{recipe['name']}】！\n"
+                f"当前境界最高只能炼制目标为【{allowed_name}】的破境丹，"
+                f"而【{recipe['name']}】用于突破【{target_name}】。"
+            )
+        return True, ""
+
+    def _level_name(self, level_index: int) -> str:
+        """取境界显示名（灵修优先，取不到则回退为「境界N」）"""
+        if not self.config_manager:
+            return f"境界{level_index}"
+        level_data = self.config_manager.get_level_data("灵修")
+        if 0 <= level_index < len(level_data):
+            return level_data[level_index].get("level_name", f"境界{level_index}")
+        return f"境界{level_index}"
+
+    def _is_breakthrough_pill(self, name: str) -> bool:
+        """判断丹药是否为破境丹（pills.json 中 subtype=breakthrough）"""
+        if not self.config_manager:
+            return False
+        pill = self.config_manager.pills_data.get(name)
+        return bool(pill and pill.get("subtype") == "breakthrough")
     
     def _generate_pill_desc(self, pill_config: Dict) -> str:
         """根据丹药配置生成描述"""
@@ -127,23 +183,33 @@ class AlchemyManager:
         for recipe_id, recipe in self.recipes.items():
             if player.level_index >= recipe.get("level_required", 0):
                 available_recipes.append(recipe)
-        
+
         if not available_recipes:
             return False, "❌ 你当前境界无法炼制任何丹药！"
-        
+
         msg = "🔥 丹药配方\n"
         msg += "━━━━━━━━━━━━━━━\n\n"
-        
+
         for recipe in available_recipes:
             materials_str = ", ".join([f"{k}×{v}" for k, v in recipe["materials"].items()])
             msg += f"【{recipe['name']}】(ID:{recipe['id']})\n"
             msg += f"  需求境界：Lv.{recipe['level_required']}\n"
+            # ⚠️ v3.3.8：破境丹标注「可炼境界上限」，避免玩家白跑一趟
+            if recipe.get("is_breakthrough") and recipe.get("target_level_index") is not None:
+                allowed = player.level_index + 1
+                mark = "✅ 可炼" if recipe["target_level_index"] <= allowed else "🔒 未达境界"
+                msg += (
+                    f"  突破目标：{self._level_name(recipe['target_level_index'])}"
+                    f"（{mark}）\n"
+                )
             msg += f"  材料：{materials_str}\n"
             msg += f"  成功率：{recipe['success_rate']}%\n"
             msg += f"  效果：{recipe['desc']}\n\n"
-        
+
         msg += "使用 /炼丹 <丹药ID> 开始炼制"
-        
+        if any(r.get("is_breakthrough") for r in available_recipes):
+            msg += "\n💡 破境丹限制：只能炼制「目标境界 ≤ 自身当前境界 + 1」的破境丹"
+
         return True, msg
     
     async def craft_pill(
@@ -177,7 +243,12 @@ class AlchemyManager:
         # 3. 检查境界要求
         if player.level_index < recipe["level_required"]:
             return False, f"❌ 炼制{recipe['name']}需要达到境界等级 {recipe['level_required']}！", None
-        
+
+        # 3.5 破境丹的境界限制（筑基后期最高可炼结丹丹，金丹中期最高可炼温丹丹）
+        ok, limit_msg = self._check_breakthrough_limit(player, recipe)
+        if not ok:
+            return False, limit_msg, None
+
         # 4. 检查所有材料
         materials = recipe["materials"]
         missing_materials = []

@@ -6,7 +6,10 @@ from ..data import DataBase
 from ..core import StorageRingManager
 from ..config_manager import ConfigManager
 from ..models import Player
-from .utils import player_required, extract_target_id, looks_like_user_id, strip_target_from_text
+from .utils import (
+    player_required, extract_target_id, looks_like_user_id, strip_target_from_text,
+    parse_counted_args, parse_name_and_count,
+)
 
 CMD_STORAGE_RING = "储物戒"
 CMD_STORE_ITEM = "存入"
@@ -173,6 +176,57 @@ class StorageRingHandler:
         else:
             yield event.plain_result(f"❌ {message}")
 
+    # ===== 赠予：丹药与普通物品走不同的背包 =====
+    # 丹药存「丹药背包」(pills_inventory)，且储物戒明确禁止存丹药
+    # ⇒ 赠予丹药必须走丹药背包，否则必然失败（此前即为此问题）。
+
+    def _is_pill(self, item_name: str) -> bool:
+        """判断物品是否为丹药（统一走 ConfigManager.is_pill）"""
+        try:
+            return bool(self.config_manager.is_pill(item_name))
+        except Exception:
+            return False
+
+    async def _take_for_gift(self, player: Player, item_name: str, count: int):
+        """从赠予者身上取走物品（丹药走丹药背包，其他走储物戒）。
+
+        Returns:
+            (是否成功, 提示文案)
+        """
+        if self._is_pill(item_name):
+            inventory = player.get_pills_inventory()
+            current = inventory.get(item_name, 0)
+            if current <= 0:
+                return False, f"丹药背包中没有【{item_name}】"
+            if current < count:
+                return False, f"丹药背包中【{item_name}】数量不足（当前：{current}个）"
+            inventory[item_name] -= count
+            if inventory[item_name] <= 0:
+                del inventory[item_name]
+            player.set_pills_inventory(inventory)
+            await self.db.update_player(player)
+            return True, ""
+
+        success, msg = await self.storage_ring_manager.retrieve_item(player, item_name, count)
+        if not success:
+            return False, msg
+        return True, ""
+
+    async def _give_to_player(self, player: Player, item_name: str, count: int):
+        """把物品放入接收者身上（丹药走丹药背包，其他走储物戒）。
+
+        Returns:
+            (是否成功, 提示文案)
+        """
+        if self._is_pill(item_name):
+            inventory = player.get_pills_inventory()
+            inventory[item_name] = inventory.get(item_name, 0) + count
+            player.set_pills_inventory(inventory)
+            await self.db.update_player(player)
+            return True, ""
+
+        return await self.storage_ring_manager.store_item(player, item_name, count)
+
     @player_required
     async def handle_gift_item(self, player: Player, event: AstrMessageEvent, args: str):
         """赠予物品给其他玩家"""
@@ -211,14 +265,9 @@ class StorageRingHandler:
         if target_id:
             text_content = strip_target_from_text(text_content, target_id).strip()
 
-        # 解析物品名和数量
+        # 解析物品名和数量（支持「丹药 3」与「丹药x3」两种写法）
         if text_content:
-            parts = text_content.rsplit(" ", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                item_name = parts[0].strip()
-                count = int(parts[1])
-            else:
-                item_name = text_content.strip()
+            item_name, count = parse_name_and_count(text_content, 1)
 
         # 验证必要参数
         if not target_id:
@@ -238,14 +287,24 @@ class StorageRingHandler:
             yield event.plain_result("数量必须大于0")
             return
 
-        # 检查物品是否在储物戒中
-        if not self.storage_ring_manager.has_item(player, item_name, count):
-            current = self.storage_ring_manager.get_item_count(player, item_name)
-            if current == 0:
-                yield event.plain_result(f"储物戒中没有【{item_name}】")
-            else:
-                yield event.plain_result(f"储物戒中【{item_name}】数量不足（当前：{current}个）")
-            return
+        # 检查物品是否在身上（丹药在丹药背包，其他在储物戒）
+        is_pill = self._is_pill(item_name)
+        if is_pill:
+            current = player.get_pills_inventory().get(item_name, 0)
+            if current <= 0:
+                yield event.plain_result(f"丹药背包中没有【{item_name}】")
+                return
+            if current < count:
+                yield event.plain_result(f"丹药背包中【{item_name}】数量不足（当前：{current}个）")
+                return
+        else:
+            if not self.storage_ring_manager.has_item(player, item_name, count):
+                current = self.storage_ring_manager.get_item_count(player, item_name)
+                if current == 0:
+                    yield event.plain_result(f"储物戒中没有【{item_name}】")
+                else:
+                    yield event.plain_result(f"储物戒中【{item_name}】数量不足（当前：{current}个）")
+                return
 
         target_player = await self.db.get_player_by_id(target_id)
         if not target_player:
@@ -256,10 +315,10 @@ class StorageRingHandler:
             yield event.plain_result("不能赠予物品给自己")
             return
 
-        # 先从储物戒中取出物品
-        success, _ = await self.storage_ring_manager.retrieve_item(player, item_name, count)
+        # 先从背包取出物品（丹药走丹药背包，其他走储物戒）
+        success, err_msg = await self._take_for_gift(player, item_name, count)
         if not success:
-            yield event.plain_result("赠予失败：无法取出物品")
+            yield event.plain_result(f"赠予失败：{err_msg}")
             return
 
         # 存储待处理的赠予请求到数据库
@@ -296,22 +355,23 @@ class StorageRingHandler:
         sender_name = gift["sender_name"]
         gift_id = gift["id"]
 
-        # 尝试存入接收者的储物戒
-        success, message = await self.storage_ring_manager.store_item(player, item_name, count)
+        # 尝试存入接收者的背包（丹药进丹药背包，其他进储物戒）
+        success, message = await self._give_to_player(player, item_name, count)
 
         if success:
             # 删除数据库中的赠予请求
             await self.db.ext.delete_pending_gift(gift_id)
+            where = "丹药背包" if self._is_pill(item_name) else "储物戒"
             yield event.plain_result(
                 f"✅ 已接收来自【{sender_name}】的赠予！\n"
-                f"获得：【{item_name}】x{count}"
+                f"获得：【{item_name}】x{count}（已放入{where}）"
             )
         else:
             # 存入失败，物品返还给发送者
             sender_id = gift["sender_id"]
             sender_player = await self.db.get_player_by_id(sender_id)
             if sender_player:
-                await self.storage_ring_manager.store_item(sender_player, item_name, count, silent=True)
+                await self._give_to_player(sender_player, item_name, count)
 
             # 删除数据库中的赠予请求
             await self.db.ext.delete_pending_gift(gift_id)
@@ -340,7 +400,7 @@ class StorageRingHandler:
         # 物品返还给发送者
         sender_player = await self.db.get_player_by_id(sender_id)
         if sender_player:
-            await self.storage_ring_manager.store_item(sender_player, item_name, count, silent=True)
+            await self._give_to_player(sender_player, item_name, count)
 
         # 删除数据库中的赠予请求
         await self.db.ext.delete_pending_gift(gift_id)
@@ -450,13 +510,17 @@ class StorageRingHandler:
             return
 
         args = args.strip()
-        parts = args.rsplit(" ", 1)
-        if len(parts) == 2 and parts[1].isdigit():
-            item_name = parts[0]
-            count = int(parts[1])
-        else:
-            item_name = args
-            count = 1
+        # ⚠️ 宿主的 CommandFilter 对 str 参数只取第一个 token，
+        #    `/回收 灵草 5` 传进来的实为 "灵草"（数量被丢弃）⇒ 必须从原始消息重解析。
+        item_name, count = parse_counted_args(event, args, [CMD_RECYCLE_ITEM], 1)
+
+        if not item_name:
+            yield event.plain_result(
+                f"请指定要回收的物品\n"
+                f"用法：{CMD_RECYCLE_ITEM} 物品名 [数量]\n"
+                f"示例：{CMD_RECYCLE_ITEM} 灵草 5"
+            )
+            return
 
         if count <= 0:
             yield event.plain_result("数量必须大于0")

@@ -86,6 +86,41 @@ class AdventureManager:
                 {"name": "灵草", "weight": 50, "min": 1, "max": 3},
                 {"name": "精铁", "weight": 30, "min": 1, "max": 2},
                 {"name": "灵石碎片", "weight": 20, "min": 2, "max": 5}
+            ],
+            # ⚠️ v3.3.8：补齐 mid/high/extreme/chaos 兜底档位。
+            #    此前 DEFAULT_CONFIG 只有 low 档，配置文件读取失败时
+            #    所有路线都会退化成灵草/精铁/灵石碎片。
+            "mid": [
+                {"name": "灵草", "weight": 35, "min": 2, "max": 5},
+                {"name": "精铁", "weight": 25, "min": 1, "max": 3},
+                {"name": "灵兽毛皮", "weight": 20, "min": 1, "max": 3},
+                {"name": "星辰石", "weight": 20, "min": 1, "max": 2}
+            ],
+            "high": [
+                {"name": "精铁", "weight": 30, "min": 2, "max": 4},
+                {"name": "星辰石", "weight": 25, "min": 1, "max": 2},
+                {"name": "灵兽内丹", "weight": 20, "min": 1, "max": 1},
+                {"name": "功法残页", "weight": 15, "min": 1, "max": 1},
+                {"name": "天材地宝", "weight": 10, "min": 1, "max": 1},
+                {"name": "紫金沙", "weight": 4, "min": 1, "max": 1}
+            ],
+            "extreme": [
+                {"name": "星辰石", "weight": 24, "min": 2, "max": 5},
+                {"name": "灵兽内丹", "weight": 20, "min": 2, "max": 4},
+                {"name": "功法残页", "weight": 18, "min": 1, "max": 3},
+                {"name": "天材地宝", "weight": 16, "min": 1, "max": 3},
+                {"name": "紫金沙", "weight": 12, "min": 1, "max": 3},
+                {"name": "远古秘籍", "weight": 6, "min": 1, "max": 1},
+                {"name": "仙器碎片", "weight": 4, "min": 1, "max": 1}
+            ],
+            "chaos": [
+                {"name": "天材地宝", "weight": 24, "min": 3, "max": 6},
+                {"name": "功法残页", "weight": 20, "min": 2, "max": 4},
+                {"name": "紫金沙", "weight": 18, "min": 2, "max": 4},
+                {"name": "远古秘籍", "weight": 14, "min": 1, "max": 2},
+                {"name": "仙器碎片", "weight": 12, "min": 1, "max": 2},
+                {"name": "神兽之骨", "weight": 8, "min": 1, "max": 1},
+                {"name": "混沌精华", "weight": 4, "min": 1, "max": 1}
             ]
         }
     }

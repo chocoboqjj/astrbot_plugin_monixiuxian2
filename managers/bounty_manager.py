@@ -61,6 +61,8 @@ class BountyManager:
         ("adventure_roam", "历练·云游四方", "/开始历练 云游四方"),
         ("adventure_hunt", "历练·猎魔肃清", "/开始历练 猎魔肃清"),
         ("adventure_peril", "历练·九死一生", "/开始历练 九死一生"),
+        ("adventure_abyss", "历练·太虚涉险", "/开始历练 太虚涉险"),
+        ("adventure_chaos", "历练·混沌问道", "/开始历练 混沌问道"),
         ("rift", "秘境探索", "/秘境列表 查看后 /探索秘境 <ID>"),
         ("explore", "秘境探索", "/秘境列表 查看后 /探索秘境 <ID>"),
     ]

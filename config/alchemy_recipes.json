@@ -4,34 +4,234 @@
         "name": "炼气丹",
         "level_required": 0,
         "materials": {"灵草": 2, "灵石": 20},
-        "success_rate": 85
+        "success_rate": 85,
+        "desc": "最基础的修为丹，人人可炼。"
     },
     {
         "id": 2,
         "name": "聚灵丹",
         "level_required": 0,
         "materials": {"灵草": 3, "灵石": 30},
-        "success_rate": 80
+        "success_rate": 80,
+        "desc": "略胜炼气丹的修为丹。"
     },
     {
         "id": 3,
         "name": "凝气丹",
         "level_required": 1,
         "materials": {"灵草": 4, "灵石": 40},
-        "success_rate": 75
+        "success_rate": 75,
+        "desc": "稳固根基的修为丹。"
     },
     {
         "id": 4,
         "name": "培元丹",
         "level_required": 3,
         "materials": {"灵草": 5, "灵石": 60},
-        "success_rate": 70
+        "success_rate": 70,
+        "desc": "补益元气的修为丹。"
     },
     {
         "id": 5,
         "name": "玄灵丹",
         "level_required": 5,
         "materials": {"灵草": 8, "灵石": 100},
-        "success_rate": 60
+        "success_rate": 60,
+        "desc": "玄门正宗修为丹。"
+    },
+
+    {
+        "id": 6,
+        "name": "筑基丹",
+        "level_required": 9,
+        "materials": {"灵草": 10, "灵兽内丹": 2, "灵石": 800},
+        "success_rate": 55,
+        "desc": "破境丹：辅助突破至筑基期。材料需灵兽内丹——稀有材料只能靠历练与秘境获取。"
+    },
+    {
+        "id": 7,
+        "name": "结丹丹",
+        "level_required": 12,
+        "materials": {"灵草": 16, "灵兽内丹": 4, "星辰石": 3, "灵石": 3000},
+        "success_rate": 45,
+        "desc": "破境丹：辅助突破至金丹期。需星辰石与灵兽内丹。"
+    },
+    {
+        "id": 8,
+        "name": "凝婴丹",
+        "level_required": 15,
+        "materials": {"灵草": 24, "灵兽内丹": 6, "星辰石": 5, "天材地宝": 1, "灵石": 12000},
+        "success_rate": 38,
+        "desc": "破境丹：辅助突破至元婴期。需天材地宝。"
+    },
+    {
+        "id": 9,
+        "name": "化神丹",
+        "level_required": 18,
+        "materials": {"灵草": 36, "灵兽内丹": 10, "星辰石": 8, "天材地宝": 3, "灵石": 50000},
+        "success_rate": 30,
+        "desc": "破境丹：辅助突破至化神期。"
+    },
+    {
+        "id": 10,
+        "name": "炼虚丹",
+        "level_required": 21,
+        "materials": {"灵草": 50, "灵兽内丹": 14, "星辰石": 12, "天材地宝": 5, "紫金沙": 2, "灵石": 200000},
+        "success_rate": 24,
+        "desc": "破境丹：辅助突破至炼虚期。需紫金沙。"
+    },
+    {
+        "id": 11,
+        "name": "合体丹",
+        "level_required": 24,
+        "materials": {"灵草": 70, "灵兽内丹": 20, "星辰石": 18, "天材地宝": 8, "紫金沙": 4, "灵石": 800000},
+        "success_rate": 18,
+        "desc": "破境丹：辅助突破至合体期。"
+    },
+    {
+        "id": 12,
+        "name": "大乘丹",
+        "level_required": 27,
+        "materials": {"灵草": 100, "灵兽内丹": 28, "星辰石": 26, "天材地宝": 12, "紫金沙": 8, "灵石": 3000000},
+        "success_rate": 12,
+        "desc": "破境丹：辅助突破至大乘期。"
+    },
+    {
+        "id": 13,
+        "name": "渡劫丹",
+        "level_required": 30,
+        "materials": {"灵草": 140, "灵兽内丹": 36, "星辰石": 36, "天材地宝": 18, "紫金沙": 14, "混沌精华": 2, "灵石": 12000000},
+        "success_rate": 8,
+        "desc": "破境丹：辅助突破至渡劫期。需混沌精华——顶级 Boss 方能产出。"
+    },
+
+    {
+        "id": 14,
+        "name": "疾风丹",
+        "level_required": 0,
+        "materials": {"灵草": 2, "妖兽精血": 1, "灵石": 200},
+        "success_rate": 70,
+        "desc": "临时增益丹：修炼速度 +80%，持续30分钟。"
+    },
+    {
+        "id": 15,
+        "name": "修炼加速丹",
+        "level_required": 0,
+        "materials": {"灵草": 3, "妖兽精血": 2, "灵石": 500},
+        "success_rate": 65,
+        "desc": "临时增益丹：修炼速度 +50%，持续1小时。"
+    },
+    {
+        "id": 16,
+        "name": "灵气加速丹",
+        "level_required": 3,
+        "materials": {"灵草": 5, "妖兽精血": 3, "星辰石": 1, "灵石": 1500},
+        "success_rate": 55,
+        "desc": "临时增益丹：修炼速度 +100%，持续2小时。"
+    },
+    {
+        "id": 17,
+        "name": "小爆发丹",
+        "level_required": 0,
+        "materials": {"妖兽精血": 2, "灵兽毛皮": 1, "灵石": 300},
+        "success_rate": 70,
+        "desc": "临时增益丹：短时爆发的战斗增益。"
+    },
+    {
+        "id": 18,
+        "name": "狂暴丹",
+        "level_required": 3,
+        "materials": {"妖兽精血": 4, "灵兽内丹": 1, "灵兽毛皮": 2, "灵石": 1200},
+        "success_rate": 55,
+        "desc": "临时增益丹：物伤翻倍、物防减半。"
+    },
+    {
+        "id": 19,
+        "name": "霸体狂暴丹",
+        "level_required": 13,
+        "materials": {"妖兽精血": 8, "灵兽内丹": 3, "天材地宝": 1, "灵石": 8000},
+        "success_rate": 42,
+        "desc": "临时增益丹：高阶狂暴之效。"
+    },
+
+    {
+        "id": 20,
+        "name": "小力量丹",
+        "level_required": 0,
+        "materials": {"灵草": 4, "灵兽毛皮": 2, "灵石": 400},
+        "success_rate": 60,
+        "desc": "永久属性丹：物伤 +50（受每境界上限约束）。"
+    },
+    {
+        "id": 21,
+        "name": "小灵智丹",
+        "level_required": 0,
+        "materials": {"灵草": 4, "妖兽精血": 2, "灵石": 400},
+        "success_rate": 60,
+        "desc": "永久属性丹：法伤 +50（受每境界上限约束）。"
+    },
+    {
+        "id": 22,
+        "name": "力量丹",
+        "level_required": 3,
+        "materials": {"灵草": 8, "灵兽内丹": 1, "灵兽毛皮": 4, "灵石": 1500},
+        "success_rate": 50,
+        "desc": "永久属性丹：物伤 +150（受每境界上限约束）。"
+    },
+    {
+        "id": 23,
+        "name": "灵智丹",
+        "level_required": 3,
+        "materials": {"灵草": 8, "灵兽内丹": 1, "妖兽精血": 4, "灵石": 1500},
+        "success_rate": 50,
+        "desc": "永久属性丹：法伤 +150（受每境界上限约束）。"
+    },
+    {
+        "id": 24,
+        "name": "大力量丹",
+        "level_required": 10,
+        "materials": {"灵草": 16, "灵兽内丹": 3, "星辰石": 2, "灵石": 6000},
+        "success_rate": 42,
+        "desc": "永久属性丹：物伤 +300（受每境界上限约束）。"
+    },
+    {
+        "id": 25,
+        "name": "大灵智丹",
+        "level_required": 10,
+        "materials": {"灵草": 16, "灵兽内丹": 3, "星辰石": 2, "灵石": 6000},
+        "success_rate": 42,
+        "desc": "永久属性丹：法伤 +300（受每境界上限约束）。"
+    },
+    {
+        "id": 26,
+        "name": "巨力丹",
+        "level_required": 13,
+        "materials": {"灵草": 24, "灵兽内丹": 5, "星辰石": 4, "天材地宝": 1, "灵石": 20000},
+        "success_rate": 35,
+        "desc": "永久属性丹：物伤 +600（受每境界上限约束）。"
+    },
+    {
+        "id": 27,
+        "name": "通灵丹",
+        "level_required": 13,
+        "materials": {"灵草": 24, "灵兽内丹": 5, "星辰石": 4, "天材地宝": 1, "灵石": 20000},
+        "success_rate": 35,
+        "desc": "永久属性丹：法伤 +600（受每境界上限约束）。"
+    },
+    {
+        "id": 28,
+        "name": "霸体丹",
+        "level_required": 16,
+        "materials": {"灵草": 36, "灵兽内丹": 8, "星辰石": 6, "天材地宝": 2, "灵石": 60000},
+        "success_rate": 28,
+        "desc": "永久属性丹：物伤 +1200（受每境界上限约束）。"
+    },
+    {
+        "id": 29,
+        "name": "天灵丹",
+        "level_required": 16,
+        "materials": {"灵草": 36, "灵兽内丹": 8, "星辰石": 6, "天材地宝": 2, "灵石": 60000},
+        "success_rate": 28,
+        "desc": "永久属性丹：法伤 +1200（受每境界上限约束）。"
     }
 ]

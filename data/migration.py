@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 26  # v26: 炼器精炼记录（equipment_refine 表）
+LATEST_DB_VERSION = 27  # v27: 高阶秘境种子（太虚秘境 / 混沌秘境）
 
 # 灵眼时效（小时）：与 managers/spirit_eye_manager.py::SPIRIT_EYE_TYPES 保持一致。
 # 迁移函数内不能 import managers.*（会引发循环依赖），故在此复制一份并由测试断言一致性。
@@ -703,6 +703,9 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
         (3, "万妖洞", 3, 6, _json.dumps({"exp": [3000, 8000], "gold": [1000, 5000]})),
         (4, "玄冰地宫", 4, 10, _json.dumps({"exp": [5000, 15000], "gold": [2000, 10000]})),
         (5, "上古遗迹", 5, 15, _json.dumps({"exp": [10000, 30000], "gold": [5000, 20000]})),
+        # ⚠️ v3.3.8：新增 6/7 档高阶秘境（对应优化 5「增加更高级秘境」）
+        (6, "太虚秘境", 6, 19, _json.dumps({"exp": [30000, 90000], "gold": [20000, 80000]})),
+        (7, "混沌秘境", 7, 25, _json.dumps({"exp": [90000, 260000], "gold": [80000, 300000]})),
     ]
     for rift in default_rifts:
         try:
@@ -1562,3 +1565,40 @@ async def _migrate_to_v26(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v26迁移完成：炼器精炼记录已启用")
+
+
+@migration(27)
+async def _migrate_to_v27(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v27 - 高阶秘境种子（太虚秘境 / 混沌秘境）
+
+    背景（对应用户诉求「未来增加更高级秘境和历练」）：
+        原秘境种子只有 5 档（最高 required_level=15 金丹期），
+        玩家到元婴 / 化神 / 炼虚 / 合体之后没有任何秘境可打，
+        高阶玩法（炼器、破境丹、稀有材料）拿不到稳定来源。
+        同时 rift_manager 的掉落表此前只覆盖 1~3 档，
+        rift_level 4/5 的秘境会回退到低级掉落表。
+
+    变更：
+        插入 2 个高阶秘境（rift_level 6/7，门槛 19 化神初期 / 25 合体初期）；
+        幂等（INSERT OR IGNORE），重复执行不报错。
+        全新安装路径 `_create_all_tables_v2()` 的种子数据已同步。
+    """
+    logger.info("开始迁移到v27：高阶秘境种子")
+
+    import json as _json
+
+    new_rifts = [
+        (6, "太虚秘境", 6, 19, _json.dumps({"exp": [30000, 90000], "gold": [20000, 80000]})),
+        (7, "混沌秘境", 7, 25, _json.dumps({"exp": [90000, 260000], "gold": [80000, 300000]})),
+    ]
+    for rift in new_rifts:
+        try:
+            await conn.execute(
+                "INSERT OR IGNORE INTO rifts (rift_id, rift_name, rift_level, required_level, rewards) VALUES (?, ?, ?, ?, ?)",
+                rift
+            )
+        except Exception:
+            pass
+
+    await conn.commit()
+    logger.info("v27迁移完成：已添加太虚秘境 / 混沌秘境")

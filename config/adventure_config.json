@@ -105,6 +105,60 @@
       "drop_tier": "high",
       "bounty_tag": "adventure_peril",
       "bounty_progress": 3
+    },
+    {
+      "key": "abyss",
+      "name": "太虚涉险",
+      "aliases": ["太虚", "涉险", "太虚涉险", "深渊"],
+      "description": "元婴以上方可涉足太虚之境，法则混乱、空间破碎，虽九死一生，却能带回常人一生难觅的至宝。",
+      "risk": "绝境",
+      "duration": 10800,
+      "min_level": 18,
+      "fatigue_cooldown": 1800,
+      "base_exp_per_min": 105,
+      "base_gold_per_min": 32,
+      "level_bonus_exp": 38,
+      "level_bonus_gold": 12,
+      "completion_bonus": {
+        "exp": 2000,
+        "gold": 560
+      },
+      "event_weights": {
+        "safe": 5,
+        "standard": 25,
+        "risky": 40,
+        "disaster": 30
+      },
+      "drop_tier": "extreme",
+      "bounty_tag": "adventure_abyss",
+      "bounty_progress": 4
+    },
+    {
+      "key": "chaos",
+      "name": "混沌问道",
+      "aliases": ["混沌", "问道", "混沌问道", "鸿蒙"],
+      "description": "化神以上方能踏入混沌深处，此处残留着开天辟地前的本源之气，一步踏错便是万劫不复。",
+      "risk": "混沌之危",
+      "duration": 14400,
+      "min_level": 24,
+      "fatigue_cooldown": 2400,
+      "base_exp_per_min": 140,
+      "base_gold_per_min": 46,
+      "level_bonus_exp": 50,
+      "level_bonus_gold": 16,
+      "completion_bonus": {
+        "exp": 3200,
+        "gold": 900
+      },
+      "event_weights": {
+        "safe": 0,
+        "standard": 20,
+        "risky": 45,
+        "disaster": 35
+      },
+      "drop_tier": "chaos",
+      "bounty_tag": "adventure_chaos",
+      "bounty_progress": 5
     }
   ],
   "event_groups": {
@@ -236,6 +290,24 @@
       { "name": "功法残页", "weight": 15, "min": 1, "max": 1 },
       { "name": "天材地宝", "weight": 10, "min": 1, "max": 1 },
       { "name": "紫金沙", "weight": 4, "min": 1, "max": 1 }
+    ],
+    "extreme": [
+      { "name": "星辰石", "weight": 24, "min": 2, "max": 5 },
+      { "name": "灵兽内丹", "weight": 20, "min": 2, "max": 4 },
+      { "name": "功法残页", "weight": 18, "min": 1, "max": 3 },
+      { "name": "天材地宝", "weight": 16, "min": 1, "max": 3 },
+      { "name": "紫金沙", "weight": 12, "min": 1, "max": 3 },
+      { "name": "远古秘籍", "weight": 6, "min": 1, "max": 1 },
+      { "name": "仙器碎片", "weight": 4, "min": 1, "max": 1 }
+    ],
+    "chaos": [
+      { "name": "天材地宝", "weight": 24, "min": 3, "max": 6 },
+      { "name": "功法残页", "weight": 20, "min": 2, "max": 4 },
+      { "name": "紫金沙", "weight": 18, "min": 2, "max": 4 },
+      { "name": "远古秘籍", "weight": 14, "min": 1, "max": 2 },
+      { "name": "仙器碎片", "weight": 12, "min": 1, "max": 2 },
+      { "name": "神兽之骨", "weight": 8, "min": 1, "max": 1 },
+      { "name": "混沌精华", "weight": 4, "min": 1, "max": 1 }
     ]
   }
 }

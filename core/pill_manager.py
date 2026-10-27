@@ -115,7 +115,141 @@ class PillManager:
         if pill:
             return pill
 
+        # ⚠️ v3.3.8：兜底查 items.json 的「旧系统丹药」（33 味，含三品凝神增益丹等）。
+        #    这些丹药由秘境/Boss 掉落进「丹药背包」，但此前只登记在 items.json，
+        #    而本方法不查该表 ⇒ /服用丹药 一律报「配置不存在」。
+        item = self.config_manager.items_data.get(pill_name)
+        if item and item.get("type") == "丹药":
+            return item
+
         return None
+
+    @staticmethod
+    def is_legacy_pill(pill_data: dict) -> bool:
+        """判断是否为 items.json 的「旧系统丹药」（效果写在 effect 字典里）。
+
+        旧系统丹药的特征是顶层带 ``effect`` 字典（add_hp / add_experience / …），
+        而三张新丹药表（破境丹/修为丹/功能丹）都用扁平字段。
+        """
+        return isinstance(pill_data, dict) and isinstance(pill_data.get("effect"), dict)
+
+    def apply_legacy_pill_effects(self, player: Player, pill_data: dict, quantity: int = 1) -> Tuple[bool, str]:
+        """应用「旧系统丹药」（items.json）的效果。
+
+        ⚠️ 唯一权威实现：百宝阁购买（shop_handler）与丹药背包服用（pill_manager）
+        共用本方法，避免同一味丹药在两条链路上效果不一致。
+
+        Args:
+            player: 玩家对象
+            pill_data: items.json 中的丹药配置
+            quantity: 生效数量
+
+        Returns:
+            (是否成功, 消息)
+        """
+        effects = pill_data.get("effect") or {}
+        if not effects:
+            return False, f"丹药【{pill_data.get('name', '未知')}】无效果配置。"
+
+        effect_msgs = []
+        pill_name = pill_data.get("name", "未知丹药")
+
+        for _ in range(quantity):
+            # 恢复/扣除气血（灵修走灵气，体修走气血）
+            if "add_hp" in effects:
+                hp_change = effects["add_hp"]
+                if player.cultivation_type == "体修":
+                    old_blood = player.blood_qi
+                    player.blood_qi = max(0, min(player.max_blood_qi, player.blood_qi + hp_change))
+                    if hp_change > 0:
+                        effect_msgs.append(f"气血+{player.blood_qi - old_blood}")
+                    else:
+                        effect_msgs.append(f"气血{hp_change}")
+                else:
+                    old_qi = player.spiritual_qi
+                    player.spiritual_qi = max(0, min(player.max_spiritual_qi, player.spiritual_qi + hp_change))
+                    if hp_change > 0:
+                        effect_msgs.append(f"灵气+{player.spiritual_qi - old_qi}")
+                    else:
+                        effect_msgs.append(f"灵气{hp_change}")
+
+            # 增加修为
+            if "add_experience" in effects:
+                exp_gain = effects["add_experience"]
+                player.experience += exp_gain
+                effect_msgs.append(f"修为+{exp_gain}")
+
+            # 增加最大气血/灵气上限
+            if "add_max_hp" in effects:
+                max_hp_gain = effects["add_max_hp"]
+                if player.cultivation_type == "体修":
+                    player.max_blood_qi += max_hp_gain
+                    effect_msgs.append(f"最大气血+{max_hp_gain}")
+                else:
+                    player.max_spiritual_qi += max_hp_gain
+                    effect_msgs.append(f"最大灵气+{max_hp_gain}")
+
+            # 增加灵力（映射到法伤）
+            if "add_spiritual_power" in effects:
+                sp_gain = effects["add_spiritual_power"]
+                player.magic_damage += sp_gain
+                effect_msgs.append(f"法伤+{sp_gain}")
+
+            # 增加精神力
+            if "add_mental_power" in effects:
+                mp_gain = effects["add_mental_power"]
+                player.mental_power += mp_gain
+                effect_msgs.append(f"精神力+{mp_gain}")
+
+            # 增加攻击力（映射到物伤）
+            if "add_attack" in effects:
+                atk_gain = effects["add_attack"]
+                player.physical_damage += atk_gain
+                effect_msgs.append(f"物伤+{atk_gain}")
+
+            # 增加防御力（映射到物防）
+            if "add_defense" in effects:
+                def_gain = effects["add_defense"]
+                player.physical_defense += def_gain
+                effect_msgs.append(f"物防+{def_gain}")
+
+            # 增加/扣除灵石
+            if "add_gold" in effects:
+                gold_change = effects["add_gold"]
+                player.gold += gold_change
+                effect_msgs.append(f"灵石+{gold_change}")
+
+            # 突破成功率加成（临时效果，1 小时）
+            if "add_breakthrough_bonus" in effects:
+                bonus = effects["add_breakthrough_bonus"]
+                current_effects = player.get_active_pill_effects()
+                current_effects.append({
+                    "pill_name": pill_name,
+                    "subtype": "breakthrough_boost",
+                    "breakthrough_bonus": bonus,
+                    "expiry_time": int(time.time()) + 3600,
+                })
+                player.set_active_pill_effects(current_effects)
+                sign = "+" if bonus > 0 else ""
+                effect_msgs.append(f"突破成功率{sign}{int(bonus * 100)}%(1小时)")
+
+        # 确保属性不为负
+        player.physical_damage = max(0, player.physical_damage)
+        player.magic_damage = max(0, player.magic_damage)
+        player.physical_defense = max(0, player.physical_defense)
+        player.magic_defense = max(0, player.magic_defense)
+        player.mental_power = max(0, player.mental_power)
+        player.spiritual_qi = min(player.spiritual_qi, player.max_spiritual_qi)
+        player.blood_qi = min(player.blood_qi, player.max_blood_qi)
+
+        # 去重效果消息
+        unique_effects = list(dict.fromkeys(effect_msgs))
+        effects_str = "、".join(unique_effects[:5])
+        if len(unique_effects) > 5:
+            effects_str += "..."
+
+        qty_str = f"x{quantity}" if quantity > 1 else ""
+        return True, f"服用【{pill_name}】{qty_str}成功！效果：{effects_str}"
 
     async def update_temporary_effects(self, player: Player):
         """更新临时丹药效果，移除过期效果
@@ -146,17 +280,24 @@ class PillManager:
     async def use_pill(
         self,
         player: Player,
-        pill_name: str
+        pill_name: str,
+        count: int = 1
     ) -> Tuple[bool, str]:
         """使用丹药
 
         Args:
             player: 玩家对象
             pill_name: 丹药名称
+            count: 服用数量（v3.3.8：支持一次服用多枚相同丹药）
 
         Returns:
             (是否成功, 消息)
         """
+        try:
+            count = max(1, int(count))
+        except (TypeError, ValueError):
+            count = 1
+
         # 检查背包是否有该丹药
         inventory = player.get_pills_inventory()
         if pill_name not in inventory or inventory[pill_name] <= 0:
@@ -166,6 +307,11 @@ class PillManager:
         pill_data = self.get_pill_by_name(pill_name)
         if not pill_data:
             return False, f"丹药【{pill_name}】配置不存在！"
+
+        # 数量不足时按实际持有量收敛
+        available = inventory[pill_name]
+        if count > available:
+            count = available
 
         # 检查境界需求
         required_level = pill_data.get("required_level_index", 0)
@@ -179,7 +325,6 @@ class PillManager:
                 f"境界不足！使用【{pill_name}】需要达到【{level_name}】"
             )
 
-        # 根据丹药类型处理
         # 每日丹药使用上限（防止丹药无限刷属性，daily_pill_usage 此前从未被使用）
         today = time.strftime("%Y-%m-%d")
         if player.last_daily_reset != today:
@@ -187,52 +332,92 @@ class PillManager:
             player.last_daily_reset = today
         daily_usage = player.get_daily_pill_usage()
         daily_limit = self._get_daily_pill_limit()
-        if daily_limit and sum(daily_usage.values()) >= daily_limit:
+        used_today = sum(daily_usage.values())
+        if daily_limit and used_today >= daily_limit:
             return False, (
                 f"今日服用丹药已达上限（{daily_limit} 次）！\n"
-                f"当前已用：{sum(daily_usage.values())} 次\n"
+                f"当前已用：{used_today} 次\n"
                 f"💡 明日 0 点自动重置，请合理规划丹药使用。"
             )
-        daily_usage[pill_name] = daily_usage.get(pill_name, 0) + 1
+        # 批量服用时，实际能服用的枚数受每日上限约束
+        if daily_limit:
+            count = min(count, daily_limit - used_today)
+            if count <= 0:
+                return False, (
+                    f"今日服用丹药已达上限（{daily_limit} 次）！\n"
+                    f"当前已用：{used_today} 次\n"
+                    f"💡 明日 0 点自动重置，请合理规划丹药使用。"
+                )
+
+        # ⚠️ v3.3.8：items.json 的「旧系统丹药」（三品凝神增益丹等）走独立分支。
+        #    它们的效果写在 effect 字典里，与新丹药表的扁平字段结构不同。
+        if self.is_legacy_pill(pill_data):
+            return await self._use_legacy_pill(player, pill_name, pill_data, count)
+
+        daily_usage[pill_name] = daily_usage.get(pill_name, 0) + count
         player.set_daily_pill_usage(daily_usage)
 
         effect_type = pill_data.get("effect_type", "instant")
         subtype = pill_data.get("subtype", "")
         if subtype == "exp":
             # 修为丹
-            return await self._use_exp_pill(player, pill_name, pill_data)
+            return await self._use_exp_pill(player, pill_name, pill_data, count)
         elif subtype == "resurrection":
             # 回生丹
             return await self._use_resurrection_pill(player, pill_name, pill_data)
         elif effect_type == "temporary":
             # 临时效果丹药
-            return await self._use_temporary_pill(player, pill_name, pill_data)
+            return await self._use_temporary_pill(player, pill_name, pill_data, count)
         elif effect_type == "permanent":
             # 永久属性丹药
-            return await self._use_permanent_pill(player, pill_name, pill_data)
+            return await self._use_permanent_pill(player, pill_name, pill_data, count)
         elif effect_type == "instant":
             # 瞬间效果丹药
-            return await self._use_instant_pill(player, pill_name, pill_data)
+            return await self._use_instant_pill(player, pill_name, pill_data, count)
         else:
             # 不回显原始英文配置键
             return False, f"未知的丹药类型：{self.EFFECT_TYPE_NAMES.get(effect_type, '未知类型')}"
 
-    async def _use_exp_pill(self, player: Player, pill_name: str, pill_data: dict) -> Tuple[bool, str]:
-        """使用修为丹"""
-        exp_gain = pill_data.get("exp_gain", 0)
+    async def _use_legacy_pill(self, player: Player, pill_name: str, pill_data: dict, count: int = 1) -> Tuple[bool, str]:
+        """服用 items.json 的「旧系统丹药」（三品凝神增益丹等）。
+
+        效果语义与百宝阁购买时完全一致（共用 apply_legacy_pill_effects），
+        区别仅在于：本路径从「丹药背包」扣除丹药，而购买路径是即时消耗。
+        """
+        # 扣除丹药
+        inventory = player.get_pills_inventory()
+        inventory[pill_name] -= count
+        if inventory[pill_name] <= 0:
+            del inventory[pill_name]
+        player.set_pills_inventory(inventory)
+
+        success, message = self.apply_legacy_pill_effects(player, pill_data, count)
+        if not success:
+            # 效果未生效 → 把丹药还回去，避免白白损失
+            inventory = player.get_pills_inventory()
+            inventory[pill_name] = inventory.get(pill_name, 0) + count
+            player.set_pills_inventory(inventory)
+
+        await self.db.update_player(player)
+        return success, message
+
+    async def _use_exp_pill(self, player: Player, pill_name: str, pill_data: dict, count: int = 1) -> Tuple[bool, str]:
+        """使用修为丹（支持一次服用多枚）"""
+        exp_gain = pill_data.get("exp_gain", 0) * count
         player.experience += exp_gain
 
         # 扣除丹药
         inventory = player.get_pills_inventory()
-        inventory[pill_name] -= 1
+        inventory[pill_name] -= count
         if inventory[pill_name] <= 0:
             del inventory[pill_name]
         player.set_pills_inventory(inventory)
 
         await self.db.update_player(player)
 
+        qty_str = f"x{count}" if count > 1 else ""
         return True, (
-            f"✨ 服用【{pill_name}】成功！\n"
+            f"✨ 服用【{pill_name}】{qty_str}成功！\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📈 获得修为：{exp_gain}\n"
             f"💫 当前修为：{player.experience}\n"
@@ -264,24 +449,13 @@ class PillManager:
             f"━━━━━━━━━━━━━━━"
         )
 
-    async def _use_temporary_pill(self, player: Player, pill_name: str, pill_data: dict) -> Tuple[bool, str]:
-        """使用临时效果丹药"""
+    async def _use_temporary_pill(self, player: Player, pill_name: str, pill_data: dict, count: int = 1) -> Tuple[bool, str]:
+        """使用临时效果丹药（支持一次服用多枚：每枚各生成一条效果记录）"""
         duration_minutes = pill_data.get("duration_minutes", 60)
         current_time = int(time.time())
         expiry_time = current_time + duration_minutes * 60
 
-        # 创建效果记录
-        effect = {
-            "pill_name": pill_name,
-            "pill_id": pill_data.get("id", ""),
-            "subtype": pill_data.get("subtype", ""),
-            "start_time": current_time,
-            "expiry_time": expiry_time,
-            "duration_minutes": duration_minutes,
-            "last_tick_time": current_time,
-        }
-
-        # 添加具体效果数据
+        # 效果数据键
         effect_keys = [
             "cultivation_multiplier", "physical_damage_multiplier", "magic_damage_multiplier",
             "physical_defense_multiplier", "magic_defense_multiplier",
@@ -289,18 +463,29 @@ class PillManager:
             "spiritual_qi_regen_per_minute", "blood_qi_regen_per_minute", "blood_qi_cost_per_minute",
             "breakthrough_bonus", "temp_bonus_cap"
         ]
-        for key in effect_keys:
-            if key in pill_data:
-                effect[key] = pill_data[key]
 
-        # 添加到活跃效果
+        # 添加到活跃效果（每枚一条）
         effects = player.get_active_pill_effects()
-        effects.append(effect)
+        for _ in range(count):
+            effect = {
+                "pill_name": pill_name,
+                "pill_id": pill_data.get("id", ""),
+                "subtype": pill_data.get("subtype", ""),
+                "start_time": current_time,
+                "expiry_time": expiry_time,
+                "duration_minutes": duration_minutes,
+                "last_tick_time": current_time,
+            }
+            # 添加具体效果数据
+            for key in effect_keys:
+                if key in pill_data:
+                    effect[key] = pill_data[key]
+            effects.append(effect)
         player.set_active_pill_effects(effects)
 
         # 扣除丹药
         inventory = player.get_pills_inventory()
-        inventory[pill_name] -= 1
+        inventory[pill_name] -= count
         if inventory[pill_name] <= 0:
             del inventory[pill_name]
         player.set_pills_inventory(inventory)
@@ -373,8 +558,9 @@ class PillManager:
 
         effects_str = "、".join(effect_desc) if effect_desc else "特殊效果"
 
+        qty_str = f"x{count}" if count > 1 else ""
         return True, (
-            f"✨ 服用【{pill_name}】成功！\n"
+            f"✨ 服用【{pill_name}】{qty_str}成功！\n"
             f"━━━━━━━━━━━━━━━\n"
             f"⏱️ 持续时间：{duration_minutes}分钟\n"
             f"🎯 效果：{effects_str}\n"
@@ -398,7 +584,40 @@ class PillManager:
         bonus = max(0.0, min(bonus, self.MAX_BASE_LIMIT_BONUS))
         return self.DEFAULT_BASE_LIMIT_RATIO * (1.0 + bonus)
 
-    async def _use_permanent_pill(self, player: Player, pill_name: str, pill_data: dict) -> Tuple[bool, str]:
+    async def _use_permanent_pill(self, player: Player, pill_name: str, pill_data: dict, count: int = 1) -> Tuple[bool, str]:
+        """使用永久属性丹药（支持一次服用多枚）。
+
+        ⚠️ 永久丹药受「每境界 30% 增益上限」约束，多枚时逐枚结算：
+        第 N 枚可能因额度耗尽而无法生效 —— 此时**只扣除实际生效的枚数**，
+        并在文案中明确告知剩余枚数未消耗（避免玩家白白损失丹药）。
+        """
+        if count <= 1:
+            return await self._use_permanent_pill_single(player, pill_name, pill_data)
+
+        applied_count = 0
+        last_msg = ""
+        for _ in range(count):
+            success, msg = await self._use_permanent_pill_single(player, pill_name, pill_data)
+            if not success:
+                last_msg = msg
+                break
+            applied_count += 1
+            last_msg = msg
+
+        if applied_count == 0:
+            return False, last_msg
+
+        if applied_count < count:
+            # 部分成功：明确告知剩余枚数未消耗
+            return True, (
+                f"{last_msg}\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"⚠️ 本次仅成功服用 {applied_count} 枚（其余 {count - applied_count} 枚未消耗，仍在背包中）"
+            )
+
+        return True, f"{last_msg}\n━━━━━━━━━━━━━━━\n✅ 共服用 {applied_count} 枚"
+
+    async def _use_permanent_pill_single(self, player: Player, pill_name: str, pill_data: dict) -> Tuple[bool, str]:
         """使用永久属性丹药"""
         # 检查境界限制（30%上限）
         permanent_gains = player.get_permanent_pill_gains()
@@ -562,8 +781,8 @@ class PillManager:
 
         return True, "\n".join(msg_parts)
 
-    async def _use_instant_pill(self, player: Player, pill_name: str, pill_data: dict) -> Tuple[bool, str]:
-        """使用瞬间效果丹药"""
+    async def _use_instant_pill(self, player: Player, pill_name: str, pill_data: dict, count: int = 1) -> Tuple[bool, str]:
+        """使用瞬间效果丹药（支持一次服用多枚）"""
         msg_parts = [
             f"✨ 服用【{pill_name}】成功！",
             "━━━━━━━━━━━━━━━"
@@ -595,7 +814,7 @@ class PillManager:
                 actual_restore = max_energy
             else:
                 old_energy = current_energy
-                current_energy = min(current_energy + energy_restore, max_energy)
+                current_energy = min(current_energy + energy_restore * count, max_energy)
                 actual_restore = current_energy - old_energy
 
             if energy_label == "气血":
@@ -630,13 +849,15 @@ class PillManager:
 
         # 扣除丹药
         inventory = player.get_pills_inventory()
-        inventory[pill_name] -= 1
+        inventory[pill_name] -= count
         if inventory[pill_name] <= 0:
             del inventory[pill_name]
         player.set_pills_inventory(inventory)
 
         await self.db.update_player(player)
 
+        if count > 1:
+            msg_parts.insert(1, f"（共服用 {count} 枚）")
         msg_parts.append("━━━━━━━━━━━━━━━")
         return True, "\n".join(msg_parts)
 

@@ -22,6 +22,88 @@ CMD_CHECK_IN = "签到"
 # 闭关 / 历练 / 秘境 现在是三种**可并行**的离线收益，
 # 玩家可以同时挂机，且挂机期间不影响任何其他指令。
 
+def parse_name_and_count(text: str, default_count: int = 1):
+    """把「物品名 数量」解析成 (物品名, 数量)。
+
+    支持三种数量写法：
+    - ``灵草 5``   —— 空格分隔
+    - ``灵草x5``   —— x / X / ＊ / * 分隔（与商店 /购买 的写法一致）
+    - ``灵草``     —— 不带数量 ⇒ 返回 default_count
+
+    ⚠️ 宿主 ``CommandFilter`` 的 str 类型参数**只取消息里的第一个 token**，
+    因此 ``/回收 灵草 5`` 传进 handler 的 args 实为 ``"灵草"``（数量被丢弃）。
+    凡是需要「名称 + 数量」的指令，都必须用本函数从**原始消息**重新解析。
+    """
+    if not text:
+        return "", default_count
+
+    # 全角数字/空格归一化
+    normalized = text.strip().replace("　", " ")
+    normalized = normalized.translate(
+        str.maketrans("０１２３４５６７８９", "0123456789")
+    )
+    normalized = re.sub(r"\s+", " ", normalized)
+
+    # 写法一：灵草 x5 / 灵草x5
+    m = re.match(r"^(.*?)[xX＊*]\s*(\d+)$", normalized)
+    if m:
+        return m.group(1).strip(), max(1, int(m.group(2)))
+
+    # 写法二：灵草 5
+    m = re.match(r"^(.*?)\s+(\d+)$", normalized)
+    if m:
+        return m.group(1).strip(), max(1, int(m.group(2)))
+
+    return normalized.strip(), default_count
+
+
+def parse_counted_args(event, args: str, command_names, default_count: int = 1):
+    """从**原始消息**重新解析「名称 + 数量」。
+
+    Args:
+        event: 消息事件
+        args: CommandFilter 已经传入的参数（可能已被截断为单个 token）
+        command_names: 该指令的候选名（含可能的 "/" 前缀），用于从原始消息里剥离前缀
+        default_count: 未指定数量时的默认值
+
+    Returns:
+        (名称, 数量)
+    """
+    text = (args or "").strip()
+
+    # args 里已经带了数量 ⇒ 直接用
+    name, count = parse_name_and_count(text, default_count)
+    if count != default_count:
+        return name, count
+
+    # args 疑似被截断（没带数量）⇒ 从原始消息重新解析
+    raw = ""
+    try:
+        if hasattr(event, "get_message_str"):
+            raw = (event.get_message_str() or "").strip()
+    except Exception:
+        raw = ""
+
+    if not raw:
+        return name, count
+
+    # 剥离指令前缀（"/回收" / "回收" / "#回收"）
+    for prefix in command_names:
+        for lead in ("", "/", "#", "！", "!"):
+            p = lead + prefix
+            if raw.startswith(p):
+                raw = raw[len(p):].strip()
+                break
+        else:
+            continue
+        break
+
+    if not raw:
+        return name, count
+
+    return parse_name_and_count(raw, default_count)
+
+
 def get_activity_manager(db):
     """获取活动管理器（未注入时返回 None）"""
     return getattr(db, "activity_mgr", None)

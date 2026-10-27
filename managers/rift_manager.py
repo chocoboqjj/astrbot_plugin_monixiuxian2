@@ -21,6 +21,9 @@ class RiftManager:
     DEFAULT_DURATION = 1800
     
     # 秘境物品掉落表（按秘境等级分组）
+    # ⚠️ v3.3.8：原表只有 1/2/3 档，而 DB 种子秘境有 5 档（rift_level 1~5），
+    #    ⇒ rift_level 4/5 的秘境（玄冰地宫 / 上古遗迹）会回退到 1 档低级表。
+    #    现补齐 4/5 档，并把稀有材料挂到高档秘境（对应用户诉求「稀有材料通过历练和秘境随机获取」）。
     RIFT_DROP_TABLE = {
         1: [  # 低级秘境
             {"name": "灵草", "weight": 40, "min": 2, "max": 5},
@@ -41,6 +44,37 @@ class RiftManager:
             {"name": "功法残页", "weight": 20, "min": 1, "max": 2},
             {"name": "天材地宝", "weight": 15, "min": 1, "max": 1},
         ],
+        4: [  # 顶级秘境（玄冰地宫）
+            {"name": "星辰石", "weight": 28, "min": 2, "max": 5},
+            {"name": "灵兽内丹", "weight": 22, "min": 2, "max": 4},
+            {"name": "功法残页", "weight": 20, "min": 1, "max": 3},
+            {"name": "天材地宝", "weight": 18, "min": 1, "max": 2},
+            {"name": "紫金沙", "weight": 12, "min": 1, "max": 2},
+        ],
+        5: [  # 远古秘境（上古遗迹）—— 稀有材料的主要来源之一
+            {"name": "天材地宝", "weight": 28, "min": 2, "max": 4},
+            {"name": "功法残页", "weight": 20, "min": 2, "max": 4},
+            {"name": "紫金沙", "weight": 18, "min": 1, "max": 3},
+            {"name": "远古秘籍", "weight": 14, "min": 1, "max": 1},
+            {"name": "仙器碎片", "weight": 12, "min": 1, "max": 1},
+            {"name": "混沌精华", "weight": 8, "min": 1, "max": 1},
+        ],
+        6: [  # 太虚秘境（化神门槛）—— 高阶炼器 / 破境丹材料主产地
+            {"name": "天材地宝", "weight": 26, "min": 3, "max": 6},
+            {"name": "紫金沙", "weight": 22, "min": 2, "max": 4},
+            {"name": "功法残页", "weight": 18, "min": 2, "max": 4},
+            {"name": "远古秘籍", "weight": 14, "min": 1, "max": 2},
+            {"name": "仙器碎片", "weight": 12, "min": 1, "max": 2},
+            {"name": "神兽之骨", "weight": 8, "min": 1, "max": 1},
+        ],
+        7: [  # 混沌秘境（合体门槛）—— 顶级稀有材料产地
+            {"name": "天材地宝", "weight": 24, "min": 4, "max": 8},
+            {"name": "紫金沙", "weight": 20, "min": 2, "max": 5},
+            {"name": "远古秘籍", "weight": 16, "min": 1, "max": 3},
+            {"name": "仙器碎片", "weight": 14, "min": 1, "max": 2},
+            {"name": "神兽之骨", "weight": 14, "min": 1, "max": 2},
+            {"name": "混沌精华", "weight": 12, "min": 1, "max": 2},
+        ],
     }
     
     # 秘境稀有丹药掉落表（按秘境等级分组，低概率掉落通用增益丹）
@@ -59,6 +93,29 @@ class RiftManager:
             {"name": "六品破境增益丹", "weight": 20, "min": 1, "max": 1},
             {"name": "七品化神增益丹", "weight": 10, "min": 1, "max": 1},
         ],
+        4: [  # 顶级秘境 - 14%概率掉落
+            {"name": "五品渡劫增益丹", "weight": 35, "min": 1, "max": 1},
+            {"name": "六品破境增益丹", "weight": 30, "min": 1, "max": 2},
+            {"name": "七品化神增益丹", "weight": 20, "min": 1, "max": 1},
+            {"name": "八品破虚增益丹", "weight": 15, "min": 1, "max": 1},
+        ],
+        5: [  # 远古秘境 - 18%概率掉落
+            {"name": "六品破境增益丹", "weight": 30, "min": 1, "max": 2},
+            {"name": "七品化神增益丹", "weight": 25, "min": 1, "max": 2},
+            {"name": "八品破虚增益丹", "weight": 22, "min": 1, "max": 1},
+            {"name": "九品破劫增益丹", "weight": 23, "min": 1, "max": 1},
+        ],
+        6: [  # 太虚秘境 - 22%概率掉落
+            {"name": "七品化神增益丹", "weight": 30, "min": 1, "max": 2},
+            {"name": "八品破虚增益丹", "weight": 30, "min": 1, "max": 2},
+            {"name": "九品破劫增益丹", "weight": 25, "min": 1, "max": 1},
+            {"name": "焚天逆命增益丹", "weight": 15, "min": 1, "max": 1},
+        ],
+        7: [  # 混沌秘境 - 26%概率掉落
+            {"name": "八品破虚增益丹", "weight": 30, "min": 1, "max": 2},
+            {"name": "九品破劫增益丹", "weight": 35, "min": 1, "max": 2},
+            {"name": "焚天逆命增益丹", "weight": 35, "min": 1, "max": 1},
+        ],
     }
     
     # 秘境丹药掉落概率（百分比）
@@ -66,6 +123,21 @@ class RiftManager:
         1: 3,   # 低级秘境 3%
         2: 5,   # 中级秘境 5%
         3: 10,  # 高级秘境 10%
+        4: 14,  # 顶级秘境 14%
+        5: 18,  # 远古秘境 18%
+        6: 22,  # 太虚秘境 22%
+        7: 26,  # 混沌秘境 26%
+    }
+    
+    # ⚠️ v3.3.8：额外掉落概率按秘境档位递增（高档秘境可掉多件）
+    RIFT_EXTRA_DROP_CHANCE = {
+        1: 0,
+        2: 50,
+        3: 60,
+        4: 75,
+        5: 90,
+        6: 100,
+        7: 100,
     }
     
     def __init__(self, db: DataBase, config_manager=None, storage_ring_manager: "StorageRingManager" = None):
@@ -371,14 +443,23 @@ class RiftManager:
         return False
     
     def _get_rift_level_by_player(self, player: Player) -> int:
-        """根据玩家境界确定秘境等级"""
+        """根据玩家境界确定秘境等级（v3.3.8：扩展为 5 档，与 DB 秘境种子对齐）
+
+        境界索引参考 level_config.json：
+        0-9 炼气 / 10-12 筑基 / 13-15 金丹 / 16-18 元婴 / 19-21 化神
+        22-24 炼虚 / 25-27 合体 / 28-30 大乘 / 31+ 渡劫及以上
+        """
         level_index = player.level_index
         if level_index <= 5:
             return 1  # 低级秘境
         elif level_index <= 12:
             return 2  # 中级秘境
-        else:
+        elif level_index <= 18:
             return 3  # 高级秘境
+        elif level_index <= 26:
+            return 4  # 顶级秘境
+        else:
+            return 5  # 远古秘境
     
     async def _roll_rift_drops(
         self, player: Player, rift_level: int, item_chance: int
@@ -426,8 +507,8 @@ class RiftManager:
                 dropped_items.append((item["name"], count))
                 break
         
-        # 高级秘境有50%概率额外掉落一件
-        extra_chance = 50 if rift_level >= 2 else 0
+        # 额外掉落：概率按秘境档位递增（高档秘境可掉多件）
+        extra_chance = self.RIFT_EXTRA_DROP_CHANCE.get(rift_level, 0)
         extra_hit = False
         if extra_chance and random.randint(1, 100) <= extra_chance:
             extra_hit = True

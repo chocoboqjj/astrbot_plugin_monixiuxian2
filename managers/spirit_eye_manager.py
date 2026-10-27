@@ -299,6 +299,13 @@ class SpiritEyeManager:
     async def challenge_spirit_eye(self, attacker: Player, defender_id: str) -> Tuple[bool, str]:
         """挑战他人灵眼：切磋定胜负，胜者夺得该灵眼。
 
+        v3.3.8 改造（对应用户诉求「抢占别人灵眼的时候直接抢占，不要先释放后才能抢占，
+        抢占成功后默认释放」）：
+        - 攻击者**已占据**灵眼时不再被拒绝：**直接抢占**，无需先 /释放灵眼。
+        - 争夺**成功后**，自动让出自己原先占据的那处灵眼（一人只守一处），
+          并把该处未收取的修为结算给攻击者，不吞收益。
+        - 争夺失败 / 平局时，攻击者原有的灵眼**原封不动**（不会因发起而损失）。
+
         Args:
             attacker: 挑战者
             defender_id: 被挑战者（灵眼占主）user_id
@@ -314,14 +321,6 @@ class SpiritEyeManager:
             return False, "❌ 对方还未踏入修仙之路。"
 
         await self._cleanup_expired_eyes()
-
-        # 挑战者不能已占据灵眼
-        mine = await self.get_user_spirit_eye(attacker.user_id)
-        if mine:
-            return False, (
-                f"❌ 你已占据【{mine['eye_name']}】，无法再抢占。\n"
-                f"💡 可先 /释放灵眼 释放后再来。"
-            )
 
         # 目标必须确实占据灵眼
         eye = await self.get_user_spirit_eye(defender_id)
@@ -344,6 +343,10 @@ class SpiritEyeManager:
         if last and (now - last) < EYE_CLAIM_COOLDOWN:
             remain = EYE_CLAIM_COOLDOWN - (now - last)
             return False, f"❌ 抢占冷却中，还需 {remain // 60} 分 {remain % 60} 秒。"
+
+        # ⚠️ v3.3.8：**直接抢占**，不再要求「先 /释放灵眼 才能抢占」。
+        #    挑战者已占的灵眼先记下；只有争夺成功时才自动让位（失败不损失）。
+        mine = await self.get_user_spirit_eye(attacker.user_id)
 
         # 战斗属性（与决斗 / 传承挑战共用唯一权威入口）
         atk_impart = await self.db.ext.get_impart_info(attacker.user_id)
@@ -395,6 +398,22 @@ class SpiritEyeManager:
 
         # 挑战成功：结算原占主未收取的修为，然后易主
         await self._settle_pending_exp(eye, now)
+
+        # ⚠️ v3.3.8：**抢占成功后默认释放**——若挑战者原本还占着另一处灵眼，
+        #    此处自动让位（一人只守一处），并把该处未收修为结算给挑战者，不吞收益。
+        #    先处理旧位、再易主，避免出现「同时持有两处」的中间态。
+        #    ⚠️ 旧位修为的结算放在易主成功之后：否则易主失败回滚时，修为已被发放却无法收回。
+        released_note = ""
+        old_eye = None
+        if mine and int(mine.get("eye_id")) != int(eye["eye_id"]):
+            old_eye = mine
+            await self.db.conn.execute(
+                """UPDATE spirit_eyes SET owner_id = NULL, owner_name = NULL, claim_time = NULL,
+                       last_collect_time = NULL, protect_until = 0
+                   WHERE eye_id = ? AND owner_id = ?""",
+                (mine["eye_id"], attacker.user_id)
+            )
+
         cursor = await self.db.conn.execute(
             """UPDATE spirit_eyes SET owner_id = ?, owner_name = ?, claim_time = ?,
                    last_collect_time = ?, protect_until = ?
@@ -408,16 +427,24 @@ class SpiritEyeManager:
         if cursor.rowcount == 0:
             await self.db.conn.rollback()
             return False, "❌ 争夺失败，灵眼归属已变更（可能已被他人夺走或消散）。"
+
+        # 易主成功 → 结算旧位未收修为给挑战者（不吞收益）
+        if old_eye:
+            old_bonus = await self._settle_pending_exp(old_eye, now)
+            released_note = (
+                f"📜 你原先占据的【{old_eye['eye_name']}】已自动释放"
+                + (f"（结算修为 +{old_bonus:,}）" if old_bonus > 0 else "")
+                + "。\n"
+            )
         await self.db.conn.commit()
 
         remain = format_remaining(int(eye.get("expire_time") or 0) - now)
         return True, (
-            f"{log}\n"
+            f"{released_note}{log}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"✨ 争夺成功！你夺得【{eye['eye_name']}】！\n"
             f"每小时可获得 {eye['exp_per_hour']:,} 修为\n"
-            f"剩余时效：{remain}\n"
-            f"🛡️ 守护期 {EYE_PROTECT_DURATION // 60} 分钟"
+            f"剩余时效：{remain}"
         )
 
     # ===== 收取与释放 =====

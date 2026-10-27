@@ -33,10 +33,15 @@ BOSS_CONFIG = {
 
 RIFT_CONFIG = {
     "default_duration": 1800, # 30分钟
+    # 仅为展示参考；实际可探索秘境以数据库 rifts 表种子为准（data/migration.py）
     "rifts": [
-        {"id": 1, "name": "青云秘境", "level": 2, "exp_range": [100, 500], "gold_range": [50, 200]},
-        {"id": 2, "name": "幽冥鬼域", "level": 5, "exp_range": [500, 2000], "gold_range": [200, 800]},
-        {"id": 3, "name": "太古遗迹", "level": 10, "exp_range": [5000, 10000], "gold_range": [1000, 5000]},
+        {"id": 1, "name": "青云秘境", "level": 0, "exp_range": [500, 1500], "gold_range": [200, 800]},
+        {"id": 2, "name": "落日峡谷", "level": 3, "exp_range": [1500, 4000], "gold_range": [500, 2000]},
+        {"id": 3, "name": "万妖洞", "level": 6, "exp_range": [3000, 8000], "gold_range": [1000, 5000]},
+        {"id": 4, "name": "玄冰地宫", "level": 10, "exp_range": [5000, 15000], "gold_range": [2000, 10000]},
+        {"id": 5, "name": "上古遗迹", "level": 15, "exp_range": [10000, 30000], "gold_range": [5000, 20000]},
+        {"id": 6, "name": "太虚秘境", "level": 19, "exp_range": [30000, 90000], "gold_range": [20000, 80000]},
+        {"id": 7, "name": "混沌秘境", "level": 25, "exp_range": [90000, 260000], "gold_range": [80000, 300000]},
     ]
 }
 
