@@ -43,6 +43,32 @@ _SHOP_EFFECT_RE = re.compile(r"^效果\s*[:：]\s*(.*)$")
 # 物品详情首行：名称: 筑基丹
 _ITEM_NAME_RE = re.compile(r"^名称\s*[:：]\s*(.+)$")
 
+# ---------- 丹药配方专用解析 ----------
+# 配方头：【培元丹】(ID:1)
+_RECIPE_HEAD_RE = re.compile(r"^【(.+?)】\s*\(\s*ID\s*[:：]\s*(\d+)\s*\)\s*$")
+# 需求境界：Lv.0
+_RECIPE_LV_RE = re.compile(r"^需求境界\s*[:：]\s*(.+)$")
+# 突破目标：筑基期（✅ 可炼）/（🔒 未达境界）   仅破境丹有
+_RECIPE_TARGET_RE = re.compile(r"^突破目标\s*[:：]\s*(.+)$")
+# 材料：灵草×3, 灵石×100
+_RECIPE_MAT_RE = re.compile(r"^材料\s*[:：]\s*(.+)$")
+# 成功率：80%
+_RECIPE_RATE_RE = re.compile(r"^成功率\s*[:：]\s*(.+)$")
+# 效果：修为+500
+_RECIPE_DESC_RE = re.compile(r"^效果\s*[:：]\s*(.+)$")
+
+# ---------- 储物戒专用解析 ----------
+# 戒名行：【乾坤戒】（地品）   —— 升级列表用半角括号，主面板用全角，两种都要认
+_STORAGE_RING_RE = re.compile(r"^【(.+?)】\s*[（(](.+?)[）)]\s*$")
+# 容量：12/60格
+_STORAGE_CAP_RE = re.compile(r"^容量\s*[:：]\s*(\d+)\s*/\s*(\d+)\s*格?\s*$")
+# 分类头：【材料】（独占一行）
+_STORAGE_CAT_RE = re.compile(r"^【(.+?)】\s*$")
+# 物品行：· 灵草×5 / · 精铁
+_STORAGE_ITEM_RE = re.compile(r"^·\s*(.+?)\s*(?:[x×*]\s*(\d+))?\s*$")
+# 空分类：【存储物品】空
+_STORAGE_EMPTY_RE = re.compile(r"^【(.+?)】\s*(?:空|无)\s*$")
+
 # 品级阶梯（12 级，跨表统一）→ 6 档配色（rk0~rk5）
 RANK_ORDER = ["凡品", "珍品", "灵品", "地品", "天品", "皇品",
               "圣品", "帝品", "道品", "仙品", "神品", "混元先天"]
@@ -290,6 +316,48 @@ body{width:var(--w);background:var(--bg);
            margin-top:10px;padding:8px 11px;border:1px dashed var(--sec-line);border-radius:9px;
            font-size:11.5px;color:var(--ink-dim)}
 .shop-note b{color:var(--gold);font-weight:700}
+
+/* 丹药配方（单列卡片：配方字段多，双列会挤） */
+.r-list{display:flex;flex-direction:column;gap:8px;margin:10px 0 4px}
+.r-item{border:1px solid var(--card-border);border-radius:11px;padding:9px 11px 10px;
+        background:var(--card-bg);box-shadow:var(--shadow)}
+.r-top{display:flex;align-items:baseline;gap:7px}
+.r-id{font-size:9.5px;font-weight:800;color:var(--ink-faint);flex-shrink:0;
+      border:1px solid var(--chip-border);border-radius:4px;padding:1px 5px}
+.r-name{font-size:15px;font-weight:800;color:var(--ink);line-height:1.25}
+.r-rate{margin-left:auto;font-size:13px;font-weight:800;color:var(--gold-deep);white-space:nowrap}
+.r-rate i{font-style:normal;font-size:9.5px;color:var(--ink-dim);font-weight:600;margin-left:1px}
+.r-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.r-lv{font-size:9.5px;color:var(--chip-text);background:var(--chip-bg);
+      border:1px solid var(--chip-border);border-radius:4px;padding:1.5px 6px}
+.r-tg{font-size:9.5px;font-weight:700;padding:1.5px 6px;border-radius:4px}
+.r-tg.ok{color:var(--rk1);background:var(--rk-bg1)}
+.r-tg.lock{color:var(--ink-faint);background:var(--chip-bg);border:1px solid var(--chip-border)}
+.r-mat{font-size:11px;color:var(--ink-soft);line-height:1.6;margin-top:6px}
+.r-mat b{color:var(--ink);font-weight:700}
+.r-eff{font-size:11px;color:var(--ink-soft);line-height:1.5;margin-top:4px}
+.r-eff b{color:var(--accent);font-weight:700}
+
+/* 储物戒 */
+.st-head{display:flex;align-items:center;gap:10px;margin-bottom:2px}
+.st-head .dname{font-size:24px}
+.st-rank{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;flex-shrink:0;
+         color:var(--gold-deep);background:var(--badge-bg);border:1px solid var(--chip-border)}
+.st-desc{font-size:11px;color:var(--ink-dim);line-height:1.55;margin:2px 0 8px}
+.st-sec{margin-top:10px}
+.st-sec-h{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:800;
+          color:var(--gold-deep);letter-spacing:2px;margin-bottom:6px}
+.st-sec-h:after{content:"";flex:1;height:1px;background:var(--sec-line)}
+.st-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.st-chip{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--ink);
+         background:var(--chip-bg);border:1px solid var(--chip-border);
+         border-radius:8px;padding:6px 9px;line-height:1.35}
+.st-chip .nm{flex:1;min-width:0;overflow-wrap:anywhere}
+.st-chip .ct{font-size:11px;font-weight:800;color:var(--gold-deep);white-space:nowrap}
+.st-empty{font-size:11.5px;color:var(--ink-faint);padding:8px 2px}
+.st-note{margin-top:10px;padding:8px 11px;border:1px dashed var(--sec-line);border-radius:9px;
+         font-size:11.5px;color:var(--ink-dim);line-height:1.75}
+.st-note b{color:var(--gold);font-weight:700}
 """
 
 THEMES = {"paper": _CSS_THEME_PAPER, "gold": _CSS_THEME_GOLD}
@@ -499,6 +567,154 @@ def _is_shop(title: str, items) -> bool:
     if title not in PAVILION_SUB and "阁" not in title:
         return False
     return any(it.get("price") for it in items)
+
+
+# ---------- 丹药配方 ----------
+def _parse_recipes(text: str):
+    """解析丹药配方文本 → (title, recipes, notes)。
+
+    原文格式（配方头 + 若干缩进字段行，破境丹额外多一行「突破目标」）：
+        🔥 丹药配方
+        ━━━━━━━━━━━━━━━
+        【培元丹】(ID:1)
+          需求境界：Lv.0
+          突破目标：筑基期（✅ 可炼）
+          材料：灵草×3, 灵石×100
+          成功率：80%
+          效果：修为+500
+
+    通用解析会把「材料/成功率/效果」拆成各自独立的 kv ⇒ 排版散成一长列。
+    这里按「配方头行」为锚点重新聚合。
+    """
+    lines = [ln.strip() for ln in text.splitlines()]
+    title = ""
+    recipes = []
+    notes = []
+    cur = None
+    for ln in lines:
+        if not ln or _SEP_RE.match(ln):
+            continue
+        if not title:
+            title = ln
+            continue
+        m = _RECIPE_HEAD_RE.match(ln)
+        if m:
+            cur = {"name": m.group(1).strip(), "id": m.group(2), "lv": "",
+                   "target": "", "ok": False, "mats": "", "rate": "", "desc": ""}
+            recipes.append(cur)
+            continue
+        if cur is None:
+            notes.append(ln)
+            continue
+        hit = False
+        for key, rex in (("lv", _RECIPE_LV_RE), ("mats", _RECIPE_MAT_RE),
+                         ("rate", _RECIPE_RATE_RE), ("desc", _RECIPE_DESC_RE)):
+            mm = rex.match(ln)
+            if mm:
+                cur[key] = mm.group(1).strip()
+                hit = True
+                break
+        if hit:
+            continue
+        mm = _RECIPE_TARGET_RE.match(ln)
+        if mm:
+            raw = mm.group(1).strip()
+            cur["ok"] = ("可炼" in raw) and ("未达" not in raw)
+            cur["target"] = re.sub(r"[（(]\s*(?:✅?\s*可炼|🔒?\s*未达境界)\s*[）)]",
+                                   "", raw).strip()
+            continue
+        notes.append(ln)
+    return title, recipes, notes
+
+
+def _is_recipe(title: str, recipes) -> bool:
+    """判定是否为丹药配方面板。
+
+    收紧条件（避免误伤其它「【x】(ID:n)」格式的列表）：
+    - 标题含「配方」或「丹方」；
+    - 且至少一个配方带「成功率」或「材料」（配方的标志性字段）。
+    """
+    if not recipes or not ("配方" in title or "丹方" in title):
+        return False
+    return any(r.get("rate") or r.get("mats") for r in recipes)
+
+
+# ---------- 储物戒 ----------
+def _parse_storage(text: str):
+    """解析储物戒文本 → (title, info)。
+
+    info = {ring, rank, desc, used, total, cats:[{name, items:[(名称, 数量)]}], notes}
+
+    原文格式：
+        === 张三 的储物戒 ===
+        【乾坤戒】（地品）
+        可纳万物的乾坤之戒
+        容量：12/60格
+        ━━━━━━━━━━━━━━━
+        【材料】
+          · 灵草×5
+          · 精铁
+        存入：... 取出：... 搜索：... 升级：...
+    """
+    lines = [ln.strip() for ln in text.splitlines()]
+    title = ""
+    info = {"ring": "", "rank": "", "desc": "", "used": "", "total": "",
+            "cats": [], "notes": []}
+    cur_cat = None
+    for ln in lines:
+        if not ln:
+            continue
+        m = _TITLE_EQ_RE.match(ln)
+        if m and not title:
+            title = m.group(1).strip()
+            continue
+        if not title:
+            title = ln
+            continue
+        if _SEP_RE.match(ln):
+            continue
+        if not info["ring"]:
+            mm = _STORAGE_RING_RE.match(ln)
+            if mm:
+                info["ring"], info["rank"] = mm.group(1).strip(), mm.group(2).strip()
+                continue
+        if not info["total"]:
+            mm = _STORAGE_CAP_RE.match(ln)
+            if mm:
+                info["used"], info["total"] = mm.group(1), mm.group(2)
+                continue
+        me = _STORAGE_EMPTY_RE.match(ln)     # 【存储物品】空
+        if me:
+            info["cats"].append({"name": me.group(1).strip(), "items": []})
+            cur_cat = None
+            continue
+        mc = _STORAGE_CAT_RE.match(ln)
+        if mc:
+            cur_cat = {"name": mc.group(1).strip(), "items": []}
+            info["cats"].append(cur_cat)
+            continue
+        mi = _STORAGE_ITEM_RE.match(ln)
+        if mi and cur_cat is not None:
+            cur_cat["items"].append((mi.group(1).strip(), mi.group(2) or ""))
+            continue
+        # 其余：戒子描述（第一个）→ desc；用法/警告 → notes
+        if not info["desc"] and not info["cats"] and not info["total"]:
+            info["desc"] = ln
+        else:
+            info["notes"].append(ln)
+    return title, info
+
+
+def _is_storage(title: str, info) -> bool:
+    """判定是否为储物戒**主面板**。
+
+    ⚠️ 必须匹配「XX 的储物戒」：「储物戒列表」（升级用）虽然也含「储物戒」，
+    但它的条目是「容量：N格 | 需求：境界」且列出多枚戒子，按主面板渲染会错位，
+    故用「的储物戒」把它排除在外。
+    """
+    if "的储物戒" not in title:
+        return False
+    return bool(info.get("total")) or bool(info.get("cats"))
 
 
 # ============================================================
@@ -800,6 +1016,89 @@ def _render_shop(title: str, items, notes, theme: str = DEFAULT_THEME) -> str:
 
 
 # ============================================================
+# 布局六：丹药配方（⚗ 单列卡片）
+# ============================================================
+def _render_recipe(title: str, recipes, notes, theme: str = DEFAULT_THEME) -> str:
+    """丹药配方面板：每个配方一张卡（名称+ID+成功率 / 境界+突破目标 / 材料 / 效果）。
+
+    配方字段行多（材料串可能很长），用**单列**卡片而非商店那种双列网格，避免挤压换行。
+    """
+    h = ['<div class="st-head">'
+         f'<div class="dname gold-t">{_esc(title)}</div>'
+         '<div class="p-sub">ALCHEMY RECIPES</div></div>']
+
+    cells = []
+    for r in recipes:
+        id_html = f'<span class="r-id">#{_esc(r["id"])}</span>' if r["id"] else ""
+        rate_html = ""
+        if r["rate"]:
+            rate_html = f'<span class="r-rate">{_emph(_esc(r["rate"]))}<i>成功率</i></span>'
+
+        meta = []
+        if r["lv"]:
+            meta.append(f'<span class="r-lv">需求 {_esc(r["lv"])}</span>')
+        if r["target"]:
+            cls = "r-tg ok" if r["ok"] else "r-tg lock"
+            mark = "✅ 可炼" if r["ok"] else "🔒 未达境界"
+            meta.append(f'<span class="{cls}">{_esc(r["target"])} · {mark}</span>')
+        meta_html = f'<div class="r-meta">{"".join(meta)}</div>' if meta else ""
+
+        mat_html = ""
+        if r["mats"]:
+            parts = [p.strip() for p in re.split(r"[,，、]", r["mats"]) if p.strip()]
+            inner = " · ".join(f"<b>{_esc(p)}</b>" for p in parts)
+            mat_html = f'<div class="r-mat">🧪 材料 {inner}</div>'
+
+        eff_html = f'<div class="r-eff">{_emph(_esc(r["desc"]))}</div>' if r["desc"] else ""
+
+        cells.append('<div class="r-item">'
+                     f'<div class="r-top">{id_html}'
+                     f'<span class="r-name">{_esc(r["name"])}</span>'
+                     f'{rate_html}</div>'
+                     f'{meta_html}{mat_html}{eff_html}</div>')
+    h.append(f'<div class="r-list">{"".join(cells)}</div>')
+
+    if notes:
+        rows = "".join(f'<div>{_emph(_esc(n))}</div>' for n in notes)
+        h.append(f'<div class="st-note">{rows}</div>')
+
+    return _frame("", "".join(h), theme)
+
+
+# ============================================================
+# 布局七：储物戒（💍 戒子信息 + 容量条 + 分类物品格）
+# ============================================================
+def _render_storage(title: str, info, theme: str = DEFAULT_THEME) -> str:
+    """储物戒面板：戒名/品级 → 容量进度条 → 按分类的 2 列物品格 → 用法提示。"""
+    rank_html = (f'<span class="st-rank">{_esc(info["rank"])}</span>'
+                 if info["rank"] else "")
+    h = ['<div class="st-head">'
+         f'<div class="dname gold-t">💍 {_esc(info["ring"] or "储物戒")}</div>'
+         f'{rank_html}</div>'
+         f'<div class="p-sub">{_esc(title)}</div>']
+
+    if info["desc"]:
+        h.append(f'<div class="st-desc">{_esc(info["desc"])}</div>')
+    if info["total"]:
+        h.append(_progress("容量", info["used"] or "0", info["total"]))
+
+    for cat in info["cats"]:
+        chips = []
+        for nm, ct in cat["items"]:
+            ct_html = f'<span class="ct">×{_esc(ct)}</span>' if ct else ""
+            chips.append(f'<div class="st-chip"><span class="nm">{_esc(nm)}</span>{ct_html}</div>')
+        body = (f'<div class="st-grid">{"".join(chips)}</div>' if chips
+                else '<div class="st-empty">（空）</div>')
+        h.append(f'<div class="st-sec"><div class="st-sec-h">【{_esc(cat["name"])}】</div>{body}</div>')
+
+    if info["notes"]:
+        rows = "".join(f'<div>{_emph(_esc(n))}</div>' for n in info["notes"])
+        h.append(f'<div class="st-note">{rows}</div>')
+
+    return _frame("", "".join(h), theme)
+
+
+# ============================================================
 # 布局五：物品详情（单件商品详解）
 # ============================================================
 def _render_item_detail(title: str, sections, theme: str = DEFAULT_THEME) -> str:
@@ -933,6 +1232,16 @@ def render_panel_html(text: str, theme: str = DEFAULT_THEME) -> Optional[str]:
     shop_title, shop_items, shop_notes = _parse_shop_items(text)
     if _is_shop(shop_title, shop_items):
         return _render_shop(shop_title, shop_items, shop_notes, theme)
+
+    # ② 丹药配方（专用解析器：按配方头行重新聚合）
+    r_title, recipes, r_notes = _parse_recipes(text)
+    if _is_recipe(r_title, recipes):
+        return _render_recipe(r_title, recipes, r_notes, theme)
+
+    # ③ 储物戒主面板（容量进度条 + 分类物品格）
+    s_title, s_info = _parse_storage(text)
+    if _is_storage(s_title, s_info):
+        return _render_storage(s_title, s_info, theme)
 
     title, sections = _parse_sections(text)
     if _is_player(title, sections):
