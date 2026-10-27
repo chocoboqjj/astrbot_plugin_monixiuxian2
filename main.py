@@ -210,6 +210,9 @@ def _render_options():
        右边 310px 是空的 ``body`` 背景 ⇒ 显式指定 ``viewport_width`` 让视口与面板等宽。
 
     ``full_page`` 保持 True：面板高度不固定，截整页才能完整显示（视口宽度仍按上面精确指定）。
+    ``viewport_height`` 取极小值（10）：full_page 截图的高度是「内容高 vs 视口高」的较大者，
+    服务端默认视口高 720px ⇒ 内容不足 720px 的面板（如商店货架）底部会补一大片空白，
+    把视口高压到 10px 就能让 full_page 按内容实际高度裁剪（内容更高的面板不受影响）。
     ``device_scale_factor_level`` 提高设备像素比（high=1.3x / ultra=1.8x）⇒ 文字更锐利。
 
     兼容性：这些键都是 Playwright 截图 API 的标准参数，服务端 Pydantic 模型会忽略
@@ -219,6 +222,7 @@ def _render_options():
         "type": "png",                       # 无损，文字锐利（替代 jpeg quality=40）
         "full_page": True,                   # 面板高度不定，截整页
         "viewport_width": PANEL_WIDTH,       # 视口 = 面板宽，消除右侧空白色块
+        "viewport_height": 10,               # 视口高度取极小值 ⇒ full_page 按内容实际高度裁剪
         "device_scale_factor_level": "ultra",  # 1.8x 像素比，细节更清晰
     }
 

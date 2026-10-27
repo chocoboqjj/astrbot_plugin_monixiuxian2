@@ -33,6 +33,26 @@ _PCT_STAT_RE = re.compile(r"^(.+?)\s+([+＋][\d,.]+%?)$")          # ⚔️ 物�
 _NUM_RE = re.compile(r"([+＋]\d[\d,.]*%?)")
 _NUMV_RE = re.compile(r"^([\d,]+)\s*/\s*([\d,]+)$")
 
+# ---------- 商店（阁楼货架）专用解析 ----------
+# 商品头：1. [凡品] 培元丹 (破境丹) [20%折]
+_SHOP_ITEM_RE = re.compile(r"^(\d{1,3})\.\s*\[([^\]]{1,10})\]\s*(.+?)\s*\(([^)]{1,14})\)\s*(?:\[([^\]]{1,18})\])?\s*$")
+# 价格行：价格: 100 灵石 库存:3 / 价格: 100 灵石 库存紧张:3
+_SHOP_PRICE_RE = re.compile(r"^价格\s*[:：]\s*([\d,]+)\s*灵石\s*(库存紧张|库存)\s*[:：]\s*(\d+)\s*$")
+# 效果行：效果: 修为+500
+_SHOP_EFFECT_RE = re.compile(r"^效果\s*[:：]\s*(.*)$")
+# 物品详情首行：名称: 筑基丹
+_ITEM_NAME_RE = re.compile(r"^名称\s*[:：]\s*(.+)$")
+
+# 品级阶梯（12 级，跨表统一）→ 6 档配色（rk0~rk5）
+RANK_ORDER = ["凡品", "珍品", "灵品", "地品", "天品", "皇品",
+              "圣品", "帝品", "道品", "仙品", "神品", "混元先天"]
+RANK_TIER = {"凡品": 0, "珍品": 1, "灵品": 1, "地品": 1, "天品": 2, "皇品": 2,
+             "圣品": 3, "帝品": 3, "道品": 4, "仙品": 4, "神品": 5, "混元先天": 5}
+
+# 阁楼副标题
+PAVILION_SUB = {"丹阁": "ELIXIR PAVILION", "器阁": "ARMORY PAVILION",
+                 "百宝阁": "TREASURE PAVILION"}
+
 # ---------- 语义表 ----------
 SEC_ICONS = {"基本信息": "👤", "修炼属性": "☯", "装备信息": "🗡️", "宗门信息": "🏯",
              "贷款信息": "💰", "装备属性加成": "✦", "入门 & 基础": "📖",
@@ -76,6 +96,11 @@ _CSS_THEME_PAPER = """
 --zebra:rgba(201,168,92,.12);
 --shadow:0 1px 2px rgba(120,95,50,.10);
 --glow:none;
+/* 品级 6 档（rk0 凡 → rk5 混元先天）*/
+--rk0:#8a7d63;--rk1:#5e7d4a;--rk2:#3f6f8f;--rk3:#6b5a9e;--rk4:#a8622a;--rk5:#a03a2c;
+--rk-bg0:rgba(138,125,99,.10);--rk-bg1:rgba(94,125,74,.12);
+--rk-bg2:rgba(63,111,143,.12);--rk-bg3:rgba(107,90,158,.12);
+--rk-bg4:rgba(168,98,42,.13);--rk-bg5:rgba(160,58,44,.13);
 }
 """
 
@@ -113,6 +138,12 @@ _CSS_THEME_GOLD = """
 --zebra:rgba(201,168,92,.05);
 --shadow:0 1px 2px rgba(0,0,0,.4);
 --glow:0 0 30px rgba(224,181,88,.35);
+/* 品级 6 档（rk0 凡 → rk5 混元先天）*/
+--rk0:#a89a78;--rk1:#8fbe72;--rk2:#6fb0d8;--rk3:#a892e0;
+--rk4:#e8a35c;--rk5:#ef8a68;
+--rk-bg0:rgba(168,154,120,.14);--rk-bg1:rgba(143,190,114,.15);
+--rk-bg2:rgba(111,176,216,.15);--rk-bg3:rgba(168,146,224,.16);
+--rk-bg4:rgba(232,163,92,.16);--rk-bg5:rgba(239,138,104,.16);
 }
 """
 
@@ -220,6 +251,45 @@ body{width:var(--w);background:var(--bg);
 .sub{font-size:11.5px;color:var(--ink-dim);padding:1px 10px 1px 26px;line-height:1.5}
 .sub.warn{color:var(--accent-soft)}
 .warn{color:var(--accent)}
+
+/* ---- 商店：商品卡网格 ---- */
+.shop-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 4px}
+.s-item{border:1px solid var(--card-border);border-radius:11px;padding:9px 11px 10px;
+        background:var(--card-bg);box-shadow:var(--shadow);position:relative;overflow:hidden}
+.s-top{display:flex;align-items:baseline;gap:6px;margin-bottom:5px}
+.s-no{font-size:10px;color:var(--ink-faint);font-weight:700;flex-shrink:0;
+      font-family:"DIN Alternate","Menlo",monospace}
+.s-name{font-size:14.5px;font-weight:800;color:var(--ink);line-height:1.25;
+        flex:1;word-break:break-all}
+.s-price{font-size:13px;font-weight:800;color:var(--gold-deep);white-space:nowrap}
+.s-price i{font-style:normal;font-size:10px;color:var(--ink-dim);font-weight:600;margin-left:2px}
+.s-meta{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:5px}
+.s-rank{font-size:9.5px;font-weight:700;padding:1.5px 6px;border-radius:4px;letter-spacing:1px;
+        border:1px solid currentColor;line-height:1.5}
+.s-type{font-size:9.5px;color:var(--ink-dim);border:1px solid var(--chip-border);
+        border-radius:4px;padding:1.5px 6px;line-height:1.5}
+.s-off{font-size:9.5px;font-weight:700;padding:1.5px 6px;border-radius:4px;line-height:1.5;
+       color:var(--accent);border:1px solid var(--accent);background:rgba(160,58,44,.07)}
+.s-off.up{color:var(--ink-dim);border-color:var(--chip-border);background:none}
+.s-stock{font-size:10px;color:var(--ink-dim);margin-left:auto;white-space:nowrap}
+.s-stock.low{color:var(--accent);font-weight:700}
+.s-eff{font-size:11px;color:var(--ink-soft);line-height:1.5;margin-top:6px;
+       padding-top:6px;border-top:1px dashed var(--sec-line);word-break:break-all}
+.s-eff b{color:var(--accent);font-weight:700}
+/* 品级配色 */
+.rk0{color:var(--rk0);background:var(--rk-bg0)}
+.rk1{color:var(--rk1);background:var(--rk-bg1)}
+.rk2{color:var(--rk2);background:var(--rk-bg2)}
+.rk3{color:var(--rk3);background:var(--rk-bg3)}
+.rk4{color:var(--rk4);background:var(--rk-bg4)}
+.rk5{color:var(--rk5);background:var(--rk-bg5)}
+/* 阁楼头部 */
+.shop-head{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+.shop-head .dname{font-size:24px}
+.shop-note{display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+           margin-top:10px;padding:8px 11px;border:1px dashed var(--sec-line);border-radius:9px;
+           font-size:11.5px;color:var(--ink-dim)}
+.shop-note b{color:var(--gold);font-weight:700}
 """
 
 THEMES = {"paper": _CSS_THEME_PAPER, "gold": _CSS_THEME_GOLD}
@@ -356,6 +426,79 @@ def _is_help(title, sections) -> bool:
     arrows = sum(len(s["raws"]) for s in sections) and sum(
         1 for s in sections for ln in s["raws"] if _ARROW_RE.match(ln))
     return ("指令" in title) or (arrows and arrows >= 3)
+
+
+def _parse_shop_items(text: str):
+    """解析阁楼货架文本 → (title, items, notes)。
+
+    原文格式（每件商品 3 行）：
+        1. [凡品] 培元丹 (破境丹) [20%折]
+           价格: 100 灵石 库存:3
+           效果: 修为+500
+
+    通用解析会把它们拆散（商品名/价格/效果各归各的）⇒ 排版乱。
+    这里按「商品头行」为锚点重新聚合，尾随的 价格/效果 行归入当前商品。
+    """
+    lines = [ln.strip() for ln in text.splitlines()]
+    title = ""
+    items = []
+    notes = []
+    cur = None
+    for ln in lines:
+        if not ln:
+            continue
+        m = _TITLE_EQ_RE.match(ln)
+        if m and not title:
+            title = m.group(1).strip()
+            continue
+        mi = _SHOP_ITEM_RE.match(ln)
+        if mi:
+            cur = {
+                "no": mi.group(1),
+                "rank": mi.group(2).strip(),
+                "name": mi.group(3).strip(),
+                "type": mi.group(4).strip(),
+                "off": (mi.group(5) or "").strip(),
+                "price": "",
+                "stock": "",
+                "tight": False,
+                "effect": "",
+            }
+            items.append(cur)
+            continue
+        mp = _SHOP_PRICE_RE.match(ln)
+        if mp and cur is not None:
+            cur["price"] = mp.group(1)
+            cur["tight"] = (mp.group(2) == "库存紧张")
+            cur["stock"] = mp.group(3)
+            continue
+        me = _SHOP_EFFECT_RE.match(ln)
+        if me and cur is not None:
+            cur["effect"] = me.group(1).strip()
+            continue
+        # 非商品行（下次刷新 / 提示 / 其它说明）
+        if cur is None:
+            notes.append(ln)
+        elif not cur["effect"] and cur["price"]:
+            # 紧跟商品的额外说明行（如"效果"缺失时的补充）→ 并入效果
+            cur["effect"] = ln
+        else:
+            notes.append(ln)
+    return title, items, notes
+
+
+def _is_shop(title: str, items) -> bool:
+    """判定是否为阁楼货架面板。
+
+    收紧条件（避免误伤其它「1. [xx] yy (zz)」格式的列表）：
+    - 标题须是已知阁楼名，或含「阁」字；
+    - 且至少有一件商品**带价格**（货架的标志性字段）。
+    """
+    if not items:
+        return False
+    if title not in PAVILION_SUB and "阁" not in title:
+        return False
+    return any(it.get("price") for it in items)
 
 
 # ============================================================
@@ -599,7 +742,127 @@ def _render_help(title, sections, theme: str = DEFAULT_THEME) -> str:
 
 
 # ============================================================
-# 布局四：通用（玄金条目式）
+# 布局四：商店（阁楼货架 · 商品卡网格）
+# ============================================================
+def _render_shop(title: str, items, notes, theme: str = DEFAULT_THEME) -> str:
+    sub = PAVILION_SUB.get(title, "PAVILION")
+    h = [f'<div class="shop-head"><div class="dname gold-t">🏪 {_esc(title)}</div>'
+         f'<div class="p-sub">{sub}</div></div>']
+
+    cells = []
+    for it in items:
+        tier = RANK_TIER.get(it["rank"], 0)
+        rank_html = f'<span class="s-rank rk{tier}">{_esc(it["rank"])}</span>' if it["rank"] else ""
+        off_html = ""
+        if it["off"]:
+            up = it["off"].startswith("+")
+            off_html = f'<span class="s-off{" up" if up else ""}">{_esc(it["off"])}</span>'
+        price_html = ""
+        if it["price"]:
+            price_html = (f'<span class="s-price">{_esc(it["price"])}'
+                          f'<i>灵石</i></span>')
+        stock_html = ""
+        if it["stock"]:
+            label = "库存紧张" if it["tight"] else "库存"
+            cls = "s-stock low" if it["tight"] else "s-stock"
+            stock_html = f'<span class="{cls}">{label} {it["stock"]}</span>'
+        eff_html = ""
+        if it["effect"]:
+            eff_html = f'<div class="s-eff">{_emph(_esc(it["effect"]))}</div>'
+
+        cells.append(
+            '<div class="s-item">'
+            '<div class="s-top">'
+            f'<span class="s-no">{_esc(it["no"])}</span>'
+            f'<span class="s-name">{_esc(it["name"])}</span>'
+            f'{price_html}</div>'
+            '<div class="s-meta">'
+            f'{rank_html}'
+            f'<span class="s-type">{_esc(it["type"])}</span>'
+            f'{off_html}'
+            f'{stock_html}</div>'
+            f'{eff_html}'
+            '</div>'
+        )
+    h.append(f'<div class="shop-grid">{"".join(cells)}</div>')
+
+    # 提示区（下次刷新 / 购买提示）
+    note_rows = []
+    for n in notes:
+        txt = _esc(n)
+        # 「下次刷新: 5小时30分钟后」→ 高亮时长
+        txt = re.sub(r"(下次刷新\s*[:：]\s*)(.+)", r'\1<b>\2</b>', txt)
+        note_rows.append(f'<span>{txt}</span>')
+    if note_rows:
+        h.append(f'<div class="shop-note">{"".join(note_rows)}</div>')
+
+    return _frame("", "".join(h), theme)
+
+
+# ============================================================
+# 布局五：物品详情（单件商品详解）
+# ============================================================
+def _render_item_detail(title: str, sections, theme: str = DEFAULT_THEME) -> str:
+    """物品信息面板：名称/品级/价格/描述/属性/获取途径。"""
+    m = _ITEM_NAME_RE.match(title)
+    name = m.group(1).strip() if m else title
+    # 名称后面可能粘着别的内容
+    if m and len(name) > 20:
+        name = name[:20]
+
+    rank = ""
+    price = ""
+    desc = ""
+    rows = []
+    for s in sections:
+        for k, v in s["kvs"]:
+            if k == "名称":
+                continue
+            if k == "品级" and not rank:
+                rank = v
+                continue
+            if k == "价格" and not price:
+                price = v
+                continue
+            if k == "描述" and not desc:
+                desc = v
+                continue
+            rows.append((k, v))
+        for raw in s["raws"]:
+            rows.append((None, raw))
+
+    h = ['<div class="hero"><div class="dname gold-t">'
+         f'{_esc(name)}</div><div class="p-sub">ITEM DETAIL</div></div>']
+
+    badges = []
+    if rank:
+        tier = RANK_TIER.get(rank, 0)
+        badges.append(f'<span class="bd rk{tier}">{_esc(rank)}</span>')
+    if price:
+        badges.append(f'<span class="bd">💰 {_esc(price)}</span>')
+    if badges:
+        h.append(f'<div class="badges">{"".join(badges)}</div>')
+
+    if desc:
+        h.append(f'<div class="li" style="text-align:center;padding:8px 4px 2px">'
+                 f'{_esc(desc)}</div>')
+
+    body = []
+    for k, v in rows:
+        if k:
+            body.append(f'<div class="row"><span class="k">{_esc(k)}</span>'
+                        f'<span class="{_vc(v)}">{_emph(_esc(v))}</span></div>')
+        else:
+            cls = "li warn" if ("⚠" in v or "致死" in v) else "li"
+            body.append(f'<div class="{cls}">{_emph(_esc(v))}</div>')
+    if body:
+        h.append('<div class="misc">' + "".join(body) + "</div>")
+
+    return _frame("", "".join(h), theme)
+
+
+# ============================================================
+# 布局六：通用（玄金条目式）
 # ============================================================
 def _render_generic(title, sections, theme: str = DEFAULT_THEME) -> str:
     tm = re.match(r"^([^\w\s【】]{1,3})\s*(.*)$", title)
@@ -665,6 +928,12 @@ def render_panel_html(text: str, theme: str = DEFAULT_THEME) -> Optional[str]:
         return None
     if theme not in THEMES:
         theme = DEFAULT_THEME
+
+    # ① 商店货架（专用解析器：按商品头行重新聚合）
+    shop_title, shop_items, shop_notes = _parse_shop_items(text)
+    if _is_shop(shop_title, shop_items):
+        return _render_shop(shop_title, shop_items, shop_notes, theme)
+
     title, sections = _parse_sections(text)
     if _is_player(title, sections):
         return _render_player(title, sections, theme)
@@ -672,4 +941,7 @@ def render_panel_html(text: str, theme: str = DEFAULT_THEME) -> Optional[str]:
         return _render_equip(title, sections, theme)
     if _is_help(title, sections):
         return _render_help(title, sections, theme)
+    # ② 物品详情
+    if _ITEM_NAME_RE.match(title):
+        return _render_item_detail(title, sections, theme)
     return _render_generic(title, sections, theme)
