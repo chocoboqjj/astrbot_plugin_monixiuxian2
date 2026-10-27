@@ -36,7 +36,7 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 
 ## 悬赏系统约定
 - **⚠️ 改 `bounty_templates.json` 后必跑** `/tmp/xx_test/test_bounty_balance.py`（难度/奖励双单调校验）。
-- **⚠️ 时限模型取「最慢可行路线」**：猎魔/九死一生按 ceil 折算轮数、须含秘境 `rift`、`bounty_progress` 减的是**轮数**。`format_completion_hint` 把 `progress_tags` 翻成指令（描述性标签不单列）；专属掉落 `item_tables` 与主线同步。
+- **⚠️ 时限取「最慢可行路线」**：猎魔/九死一生按 ceil 折算轮数、须含秘境 `rift`、`bounty_progress` 减的是**轮数**。`format_completion_hint` 把 `progress_tags` 翻成指令；专属掉落 `item_tables` 与主线同步。
 
 ## 天地灵眼系统约定（v3.2.6）
 - **时效逐档减半**（24/12/6/3h），到期自动消散，**先结算未收修为再删，绝不吞收益**；`get_all_spirit_eyes()` 含被占，`get_available_spirit_eyes()` 只返无主。
@@ -56,8 +56,7 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **灵田一键种植**（v3.3.2）：新增指令 `一键种植 <灵草名> [数量]`，`SpiritFarmManager.plant_all` 把空种植格一次性种满；省略数量填满全部空格。原逐格 `/种植 <名>` 保留。
 
 ## 炼器/精炼与装备属性（v3.3.3/v3.3.4）
-- **根因**：README 早承诺材料用于"装备升级"但代码从未实现炼器 ⇒ 精铁/星辰石/灵兽内丹/天材地宝/紫金沙掉落无消耗；紫金沙曾全仓库仅 `items.json` 一处 = 死内容。
-- **新增**：`forge_recipes.json`(8档配方,顶层九霄帝剑耗紫金沙×5)、`forge_config.json`(精炼:max10/每星+10%/成功率85-5×星下限20/≥6星耗紫金沙)、`forge_manager.py`+`forge_handlers.py`(炼器配方/炼器/精炼)。**紫金沙闭环**：储物戒材料清单+高阶掉落表(weight4)+顶层配方硬消耗。
+- **根因**：README 承诺"装备升级"但炼器从未实现 ⇒ 材料掉落无消耗；紫金沙曾全仓库仅 `items.json` 一处 = 死内容。**新增**：`forge_recipes.json`(8档配方,九霄帝剑耗紫金沙×5)、`forge_config.json`(精炼:max10/每星+10%/成功率85-5×星下限20/≥6星耗紫金沙)、`forge_manager.py`+`forge_handlers.py`(炼器配方/炼器/精炼)。**紫金沙闭环**：储物戒材料清单+高阶掉落表(weight4)+顶层配方硬消耗。
 - **精炼接入战力**：`calculate_equipment_bonus` 加可选 `refine_map`；5 个战斗入口串联 `db.get_refine_map`：combat_handlers/boss_manager/impart_pk_manager/spirit_eye_manager。**DB**：`LATEST_DB_VERSION`=26 新增 `equipment_refine` 表（迁移+全新安装两处都改）；`data_manager` 加 get/set_refine_level、get_refine_map。
 - **⚠️ 战斗与面板必须共用 `models.resolve_equipment_attributes`**：items.json 有 10 件旧格式 `equip_effects` 法器（attack→物伤、defense→物防）。曾因战斗链只读新格式字段 ⇒ 旧装备「面板显示加成、战斗恒 0」（用户报告根因）。战斗链查找顺序=先 items 后 weapons（与 parse_item_from_name 一致）。
 - **⚠️ 新 manager/handler 必须登记 `__init__.py` 导出**：main.py 顶层 `from .handlers import X`，漏导出=**插件加载即崩**（ForgeHandlers/ForgeManager 曾漏）；manager 测试走合成包绕过 __init__ 全绿也抓不到，**必须跑 smoke_import.py**。
