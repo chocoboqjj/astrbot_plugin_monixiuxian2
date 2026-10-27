@@ -24,7 +24,7 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 ## 债务继承制（v3.2.7）
 - **身死不清债**：贷款未还清身死 → 转 `carried`，重开后恢复（本金=死亡锁定本金+利息、利率归零、due=now+7天），仅「逾期被银行追杀」免除。入口 `core/penalty_manager.py::apply_death_debt()`。
 - **⚠️ 时序铁律**：继承**必须在 `delete_player_cascade` 之前**（cascade 会把 active 置 bad_debt 免除）。
-- **`bank_loans`（v23 起）**：无表级 UNIQUE，改 active/carried 两条部分唯一索引（原 `UNIQUE(user_id,status)` 让玩家一生只能还清一次）。新增列 `inherit_count`/`settled_amount`/`inherit_at`/`grace_until`。`mark_loan_overdue` 须带 `AND status='active'`；恢复后须能被 `get_active_loan` 看到（洞天托管防套利）。**配置** `BANK.DEBT_INHERIT_MAX=3`/`DEBT_INHERIT_GRACE_DAYS=7`，设 0 退回旧行为。
+- **`bank_loans`（v23 起）**：无表级 UNIQUE，改 active/carried 两条部分唯一索引（原 `UNIQUE(user_id,status)` 让玩家一生只能还清一次）。新增列 `inherit_count`/`settled_amount`/`inherit_at`/`grace_until`；`mark_loan_overdue` 须带 `AND status='active'`；恢复后须能被 `get_active_loan` 看到。配置 `BANK.DEBT_INHERIT_MAX=3`/`GRACE_DAYS=7`，设 0 退回旧行为。
 
 ## 生息资产防「贷款杠杆套利」（v3.2.5）
 - **根因**：资产收益 > 贷款利率且还贷后**保留资产** ⇒ 白赚，调利率无法根除。**定案**：贷款存续期可购/升级生息资产，但**产出被银行托管**——`collect_income` 查 `db.ext.get_active_loan`，有活跃贷款则拒收。`BLESSED_LANDS.gold_per_hour` **是入库快照值** ⇒ 改常量只影响新购/升级，存量须迁移回填（v21 已做）。
