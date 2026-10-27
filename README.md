@@ -369,6 +369,8 @@
 | `VALUES` 图片模式（v3.3.5 新增） | `IMAGE_MODE`、`IMAGE_MODE_MIN_LENGTH` | 长文本回复自动渲染为图片；`IMAGE_MODE` 默认开，`IMAGE_MODE_MIN_LENGTH` = 转图字数阈值（默认 300）。**需要宿主已配置 html-render（Playwright）渲染器**，未配置或渲染失败自动回退纯文本；短回复与含 @/图片的消息不受影响 |
 | `VALUES` 面板主题（v3.3.7 新增） | `PANEL_THEME` | 转图面板的视觉主题；`paper` = 宣纸金（默认，第一版设计）、`gold` = 玄金暗色。未知值回退默认主题 |
 | `VALUES` 转图整页截图（v3.3.9 新增） | `IMAGE_MODE_FULL_PAGE` | 默认 `true`：整页截图并按面板实际高度裁剪（短内容无大片空白、超长面板不截断）。若你的渲染器对整页截图支持异常（仍出现整页空白），可改为 `false` 改用固定视口截图（超长面板可能被截断） |
+| `VALUES` 转图超时（v3.3.10 新增） | `IMAGE_MODE_RENDER_TIMEOUT` | 默认 `8`（秒）：单次渲染最长等待，超时即放弃转图回退纯文本。日志若刷 `t2i.rcfortress.site ... Cannot connect ... trying next`，说明宿主在连内置**远程**渲染后端且连不上；调小本值（如 `3`）或配合下方开关可显著提速。设 `0` = 不限制 |
+| `VALUES` 跳过远程回退（v3.3.10 新增） | `IMAGE_MODE_SKIP_REMOTE_FALLBACK` | 默认 `false`。`true` = 完全不调用 `text_to_image` 回退（该回退在未配本地渲染器时会连远程 t2i 服务，慢/不可达）。开启后：本地 `html_render` 可用则出图，否则直接发纯文本，绝不再连远程——想要「瞬时、不连外网」就设为 `true`。推荐同时在宿主侧配置本地 html-render（Playwright）渲染器 |
 
 **注意**：修改配置后需重启 AstrBot 生效。
 
@@ -382,6 +384,21 @@
 2. **获取素材**: 下载[卡图资源包](https://cowtransfer.com/s/82b90d2b879d43) (口令：k3jzr5)
 3. **放置素材**: 解压后将 `xiuxian` 文件夹放入 AstrBot 的 `data/` 目录中
 4. **生效验证**: 发送 `/我的信息`，若配置正确将发送图片
+
+### 转图很慢 / 日志刷 `t2i.rcfortress.site ... trying next` 怎么办？
+
+这是 **AstrBot 宿主**的行为，不是本插件写死的地址。本插件只调用宿主的 `html_render` /
+`text_to_image`，而 `rcfortress.site` 是 AstrBot 内置的**默认远程**渲染后端。当宿主没配本地
+渲染器时，`text_to_image` 会去连这个公共服务，连不上就逐个端点重试（`trying next`），于是很慢。
+
+三种解决（按推荐度）：
+
+1. **配本地渲染器（最快最稳）**：在 AstrBot 配置里启用本地 `html-render`（Playwright）渲染器，
+   主路径本地出图、不碰任何外网，又快又稳。配好后本插件的仙侠面板模板即可正常出图。
+2. **跳过远程回退**：把 `VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK` 设为 `true`。开启后若本地
+   `html_render` 不可用就直接发纯文本，绝不再连远程——瞬时、不连外网。适合暂时不想折腾渲染器的环境。
+3. **缩短超时兜底**：把 `VALUES.IMAGE_MODE_RENDER_TIMEOUT` 调小（如 `3`）。即使仍走远程，
+   最多等 3 秒就放弃并回退纯文本，不再被拖死。
 
 ---
 
@@ -441,6 +458,16 @@ astrbot_plugin_monixiuxian2/
 ---
 
 ## 📝 更新日志
+
+### v3.3.10 - 图片模式：渲染超时兜底 + 跳过远程回退
+
+**🐛 修复：转图连远程 t2i 服务（t2i.rcfortress.site）很慢 / 卡死**
+
+- **根因**：本插件只调用宿主的 `html_render` / `text_to_image`，而 `rcfortress.site` 是 **AstrBot 内置的默认远程渲染后端**（不是插件写死的地址）。当宿主未配置本地渲染器时，`text_to_image` 回退会去连这个公共服务，连不上就逐个端点重试（`Cannot connect ... trying next`），导致长面板回复被拖慢甚至卡死。
+- **修复（两道保险）**：
+  1. 新增 `VALUES.IMAGE_MODE_RENDER_TIMEOUT`（默认 8 秒，整数）：给单次渲染套硬超时，超时即放弃转图并回退纯文本，不再被远程挂死。
+  2. 新增 `VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK`（默认 `false`）：为 `true` 时**完全不调用**远程 `text_to_image` 回退——本地 `html_render` 可用则出图，否则直接发纯文本，绝不再连远程服务（想要「瞬时、不连外网」就设为 `true`）。
+- **推荐做法**：在宿主侧配置一个**本地** html-render（Playwright）渲染器，主路径本地出图、又快又稳，根本不会碰到远程端点。详见 README「转图很慢 / 日志刷 t2i.rcfortress.site」排障小节。
 
 ### v3.3.9 - 图片模式：仅限本插件 + 整页截图防留白
 

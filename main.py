@@ -1597,6 +1597,18 @@ class XiuXianPlugin(Star):
           该钩子在流水线 ResultDecorateStage 全局触发，若不拦截会误把其它插件的长文本 /
           LLM 回复也转成图片。
         - 短回复（确认/拒绝等）与含 At/图片的消息链不转换。
+        - v3.3.10：**渲染超时与远程回退控制**。本插件只调用宿主的 ``html_render`` /
+          ``text_to_image``，二者底层由 AstrBot 的渲染后端提供。若宿主未配置本地渲染器，
+          ``text_to_image`` 会回退到 AstrBot 内置的**远程** t2i 服务（如 t2i.rcfortress.site），
+          该公共服务可能很慢或不可达，日志会刷 ``Cannot connect ... trying next...``。
+          为此新增：
+            - VALUES.IMAGE_MODE_RENDER_TIMEOUT（秒，默认 8）：单次渲染的最长等待，超时即放弃
+              转图并回退纯文本，避免远程挂死拖慢整条回复。设 0 表示不限制。
+            - VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK（默认 false）：为 true 时**完全不调用**
+              远程 text_to_image 回退——若本地 html_render 不可用就直接发纯文本，绝不再去连
+              远程服务（想要「瞬时、不连外网」就把它设为 true）。
+          推荐做法：在宿主侧配置一个**本地** html-render（Playwright）渲染器，主路径本地出图、
+          又快又稳，根本不会碰到远程端点。
         """
         try:
             # v3.3.9：仅本插件来源。on_decorating_result 全局触发，必须先排除其它来源，
@@ -1620,18 +1632,42 @@ class XiuXianPlugin(Star):
                 return
 
             path = None
-            # ① 仙侠美化模板（v3.3.6，v3.3.7 支持双主题 + 高清渲染选项；v3.3.9 支持 full_page 开关）
+            # v3.3.10：渲染超时 + 远程回退开关
+            try:
+                timeout = int(values.get("IMAGE_MODE_RENDER_TIMEOUT", 8) or 0)
+            except (TypeError, ValueError):
+                timeout = 8
+            skip_remote = bool(values.get("IMAGE_MODE_SKIP_REMOTE_FALLBACK", False))
+
+            async def _try_render(coro):
+                # 给渲染调用套一个硬超时：本地渲染器正常时远不到上限；远程服务挂死时
+                # 直接放弃，避免整条回复被拖慢（日志会刷 trying next...）。
+                if timeout and timeout > 0:
+                    try:
+                        return await asyncio.wait_for(coro, timeout=timeout)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[长文本转图片] 渲染超时（{timeout}s），放弃本次转图")
+                        return None
+                return await coro
+
+            # ① 仙侠美化模板（v3.3.6，v3.3.7 双主题 + 高清；v3.3.9 full_page 开关）
             panel_html = render_panel_html(text, theme)
             if panel_html:
                 try:
-                    path = await self.html_render(panel_html, {}, return_url=False,
-                                                 options=_render_options(values))
+                    path = await _try_render(
+                        self.html_render(panel_html, {}, return_url=False,
+                                        options=_render_options(values)))
                 except Exception as e:
                     logger.warning(f"[面板美化] 模板渲染失败，回退默认文转图: {e}")
                     path = None
-            # ② 宿主默认文转图
-            if not path:
-                path = await self.text_to_image(text, return_url=False)
+            # ② 宿主默认文转图（未配置本地渲染器时会回退到 AstrBot 内置远程 t2i 服务，
+            #    可能很慢/不可达，由 timeout 兜底；IMAGE_MODE_SKIP_REMOTE_FALLBACK 可直接跳过）
+            if not path and not skip_remote:
+                try:
+                    path = await _try_render(self.text_to_image(text, return_url=False))
+                except Exception as e:
+                    logger.warning(f"[长文本转图片] 文转图失败，回退纯文本: {e}")
+                    path = None
             if not path:
                 return
             result.chain = [Image.fromFileSystem(path)]

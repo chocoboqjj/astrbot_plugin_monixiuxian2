@@ -51,6 +51,18 @@
         "default": true,
         "hint": "仅「长文本回复自动转图片」开启时生效。true（默认）= 整页截图并按面板实际高度裁剪，短内容不会出现大片空白、超长面板也不会被截断；若你的渲染器对整页截图支持异常（仍出现整页空白），可改为 false，改用固定视口截图（此时超长面板可能被截断）。"
       },
+      "IMAGE_MODE_RENDER_TIMEOUT": {
+        "description": "转图渲染超时（秒）",
+        "type": "int",
+        "default": 8,
+        "hint": "仅「长文本回复自动转图片」开启时生效。单次渲染（html_render / text_to_image）的最长等待秒数；超时即放弃转图并回退纯文本，避免远程渲染服务挂死时拖慢整条回复。日志若出现 t2i.rcfortress.site 的 Cannot connect / trying next，就是宿主在连内置远程渲染后端且连不上——把本值调小（如 3）或配合下方「跳过远程回退」可显著提速。设为 0 表示不限制超时。"
+      },
+      "IMAGE_MODE_SKIP_REMOTE_FALLBACK": {
+        "description": "跳过远程文转图回退",
+        "type": "bool",
+        "default": false,
+        "hint": "仅「长文本回复自动转图片」开启时生效。true = 完全不调用宿主的 text_to_image 回退（该回退在未配置本地渲染器时会连 AstrBot 内置的远程 t2i 服务，如 t2i.rcfortress.site，可能很慢或不可达）。开启后：若本地 html_render 可用则正常出图，否则直接发纯文本，绝不再去连远程服务——想要「瞬时、不连外网」就设为 true。推荐同时在宿主侧配置本地 html-render（Playwright）渲染器，主路径本地出图又快又稳。"
+      },
       "INITIAL_GOLD": {
         "description": "初始灵石",
         "type": "int",

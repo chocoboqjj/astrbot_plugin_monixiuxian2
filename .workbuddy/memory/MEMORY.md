@@ -1,6 +1,6 @@
 # 项目长期记忆
 
-AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前 v3.3.8。
+AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前 v3.3.10。
 > 详细改动见 `.workbuddy/memory/2026-10-*.md` 日志；本文件只留"不可再生的踩坑事实"。
 
 ## ⚠️ QQ 官方 @解析（v3.2.4 踩坑）
@@ -71,9 +71,16 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **v3.3.7 双主题**：`_CSS_THEME_PAPER`(宣纸金,默认)/`_CSS_THEME_GOLD`(玄金) 两套 `:root` CSS 变量 + 共享 `_CSS` 结构 ⇒ **同一 DOM 仅换配色**。配置 `VALUES.PANEL_THEME`(string, default `paper`)。**⚠️ 变量化重构须同步改 `_frame()`+4 个 `_render_*()` 形参+4 处调用点+入口分发，漏一处=主题不生效/TypeError**。
 - **⚠️ 预览页「无样式」= 预览脚本 bug，非用户机器**：摘 `render_panel_html` 产物时只取 `<body>` 会**丢掉自带 `<style>`** ⇒ 浏览器按裸文字渲染。**必须连 `<style>` 一起带，或用 iframe srcdoc 独立渲染**（与宿主 html_render 环境一致 + CSS 隔离；高度靠 JS 读 `contentDocument.body.scrollHeight` 自适应，srcdoc 同源可读）。
 - **⚠️ 用户偏好（设计）**：偏好**宣纸+金**第一版配色； dislikes "文字换底色"式逐行翻译排版。改面板视觉先确认主题取向。
-- **v3.3.7 转图选项**（`main.py::_render_options()`）：`{"type":"png","full_page":True,"viewport_width":PANEL_WIDTH,"viewport_height":10,"device_scale_factor_level":"ultra"}`。
+- **v3.3.7 转图选项**（`main.py::_render_options()`）：`{"type":"png","full_page":True,"viewport_width":PANEL_WIDTH,"viewport_height":10,"device_scale_factor_level":"high"}`。（**曾用 ultra 1.8x 不稳，已改 high 1.3x**）
   - **⚠️ t2i 服务端默认 `{"type":"jpeg","quality":40}`** ⇒ 糊；**默认视口 800px** ⇒ 右侧空白色块（面板 490px）。
   - **⚠️ `full_page` 截图高 = max(内容高, 视口高)** ⇒ 矮内容面板（商店等）底部必补白；**`viewport_height` 压到极小(10)** 才能按内容实际高度裁剪。视口宽度优先级：显式 `viewport_width` > HTML `<meta viewport>` > 默认 800。
+
+## ⚠️ 图片模式远程渲染（v3.3.10，最高频踩坑）
+- **`t2i.rcfortress.site` 不是插件写死的**——插件只调宿主 `event.html_render` / `event.text_to_image`，而 `rcfortress.site` 是 **AstrBot 内置默认远程渲染后端**。日志刷 `Cannot connect to host t2i.rcfortress.site ... trying next` = 宿主在连该公共服务且连不上（未配本地渲染器时 `text_to_image` 回退会触发）。**根因在宿主配置，不在插件**。
+- **两道保险（新增配置）**：
+  1. `VALUES.IMAGE_MODE_RENDER_TIMEOUT`（整数秒，默认 8）：单次渲染硬超时，超时放弃转图回退纯文本。**代码 `int(...)` 取整** ⇒ 配置必须是**整数秒**（写 0.2 会被截成 0=不限时）。设 0 = 不限制。
+  2. `VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK`（默认 false）：true = **完全不调** `text_to_image` 回退（绝不连远程）；本地 `html_render` 可用则出图，否则纯文本。
+- **推荐**：宿主侧配**本地** html-render（Playwright）渲染器，主路径本地出图又快又稳，根本不碰远程端点。
 - **v3.3.8 商店专属布局**：`_parse_shop_items()` 以**商品头行**为锚点重新聚合（通用解析会把商品 3 行拆散⇒排版乱）；`_render_shop()` 商品卡 2 列网格；`_render_item_detail()` 物品详情卡。12 品级→`RANK_TIER` 6 档配色(rk0~rk5)。**⚠️ `_is_shop` 须 (标题含"阁") 且 (至少一件商品带价格)**，否则「藏经阁(无价格行)」等误判。
 - **⚠️ 内容比对断言**：数值被 `<b class="num">` 包裹后字符串不连续 ⇒ 比对前须 `_re.sub(r"<[^>]+>","",html)` 去标签。
 
