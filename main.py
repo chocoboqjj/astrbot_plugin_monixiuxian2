@@ -1506,6 +1506,7 @@ class XiuXianPlugin(Star):
         - 开关：VALUES.IMAGE_MODE（默认开）；阈值：VALUES.IMAGE_MODE_MIN_LENGTH（默认 300 字）。
         - v3.3.6：优先用「仙侠面板模板」经 html_render 美化渲染；
           模板/渲染失败时回退宿主默认 text_to_image；仍失败则保持纯文本。
+        - v3.3.7：主题 VALUES.PANEL_THEME（paper=宣纸金默认 / gold=玄金暗色）。
         - 短回复（确认/拒绝等）与含 At/图片的消息链不转换。
         """
         try:
@@ -1516,6 +1517,7 @@ class XiuXianPlugin(Star):
                 min_len = int(values.get("IMAGE_MODE_MIN_LENGTH", 300))
             except (TypeError, ValueError):
                 min_len = 300
+            theme = str(values.get("PANEL_THEME", "paper") or "paper").strip().lower()
 
             result = event.get_result()
             if result is None or not getattr(result, "chain", None):
@@ -1525,8 +1527,8 @@ class XiuXianPlugin(Star):
                 return
 
             path = None
-            # ① 仙侠美化模板（v3.3.6）
-            panel_html = render_panel_html(text)
+            # ① 仙侠美化模板（v3.3.6，v3.3.7 支持双主题）
+            panel_html = render_panel_html(text, theme)
             if panel_html:
                 try:
                     path = await self.html_render(panel_html, {}, return_url=False)

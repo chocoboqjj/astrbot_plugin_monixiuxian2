@@ -4,7 +4,7 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.3.6  
+> **版本:** v3.3.7  
 > **许可证:** AGPL-3.0  
 > **作者:** xiaojuwa  
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -324,6 +324,7 @@
 | `BANK`（v3.2.7 新增） | 存款/贷款利率与上限、贷款期限、`DEBT_INHERIT_MAX`、`DEBT_INHERIT_GRACE_DAYS` | 灵石银行；`DEBT_INHERIT_MAX` = 债务继承次数上限（默认 3，第 4 次死亡强制免除），`DEBT_INHERIT_GRACE_DAYS` = 转世后宽限期天数（默认 7）。设为 `DEBT_INHERIT_MAX: 0` 即完全退回「死亡即清债」旧行为 |
 | `CALAMITY`（v3.2.9 新增） | `ENABLED`、`INTERVAL`、`NO_EVENT_CHANCE`、`RATE_JITTER`、`SHIELD_CONSUMED_ON_BLOCK` | 天灾人祸；`INTERVAL` = 触发间隔秒数（默认 3600），`NO_EVENT_CHANCE` = 虚惊一场概率（默认 30%），`RATE_JITTER` = 扣减比例抖动幅度（默认 0.2 即 ±20%） |
 | `VALUES` 图片模式（v3.3.5 新增） | `IMAGE_MODE`、`IMAGE_MODE_MIN_LENGTH` | 长文本回复自动渲染为图片；`IMAGE_MODE` 默认开，`IMAGE_MODE_MIN_LENGTH` = 转图字数阈值（默认 300）。**需要宿主已配置 html-render（Playwright）渲染器**，未配置或渲染失败自动回退纯文本；短回复与含 @/图片的消息不受影响 |
+| `VALUES` 面板主题（v3.3.7 新增） | `PANEL_THEME` | 转图面板的视觉主题；`paper` = 宣纸金（默认，第一版设计）、`gold` = 玄金暗色。未知值回退默认主题 |
 
 **注意**：修改配置后需重启 AstrBot 生效。
 
@@ -406,6 +407,22 @@ astrbot_plugin_monixiuxian2/
 - `managers/spirit_farm_manager.py` 新增 `plant_all(player, herb_name, count=None)`：把全部空种植格一次性种满指定灵草；省略 `count` 则填满所有空格，指定数量则只种 N 株。
 - `handlers/spirit_farm_handlers.py` 新增 `handle_plant_all`，兼容「灵草名 数量」同参写法。
 - `main.py` 新增指令 **`一键种植 <灵草名> [数量]`**（已登记修仙帮助与指令表）。
+
+---
+
+### v3.3.7 - 面板版式重设计 + 双主题（宣纸金 / 玄金）
+
+**✨ 升级：转图不再只是「文字换底色」，改为按面板类型重新设计版式**
+
+- **版式重设计**：渲染器不再逐行翻译旧文本，而是先识别面板类型再从原始文本提取字段重排——
+  - **我的信息** → 游戏角色卡：道号主视觉 → 境界/灵根/职业徽章 → 战力巨字 → 修为/气血进度条 → 属性网格卡 → 随身装备 → 宗门脚注；
+  - **我的装备** → 装备卡：武器/防具/心法大条目卡 + 功法胶囊组 + 属性加成数值卡；
+  - **修仙帮助** → 指令手册：金色色块段落标题 + 指令行斑马纹排版；
+  - **其余长文本** → 通用条目式排版。
+- **双主题**：`VALUES.PANEL_THEME` 可选 `paper`（**宣纸金，默认**——宣纸底 + 墨字 + 金标题，第一版设计）/ `gold`（玄金暗色 + 霓虹渐变）。两套主题共用同一套 DOM 与类名，仅 CSS 变量不同，切换零成本。
+- **修复预览无样式问题**：旧预览脚本只摘取 `<body>` 内容而丢弃面板自带 `<style>`，导致浏览器按裸文字渲染；现改为每个面板以 `iframe srcdoc` 独立渲染（与宿主 `html_render` 截图环境一致，CSS 天然隔离）。
+
+**验证**：新增 `test_panel_renderer.py` 41 项断言（含双主题配色/DOM 一致性/默认主题/未知主题回退/Jinja 兼容）；`test_image_mode.py` 19 项；`smoke_import` ALL OK。
 
 ---
 

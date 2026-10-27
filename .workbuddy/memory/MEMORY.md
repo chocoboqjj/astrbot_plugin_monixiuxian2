@@ -56,17 +56,20 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **灵田一键种植**（v3.3.2）：`一键种植 <灵草名> [数量]`，`SpiritFarmManager.plant_all` 一次填满空种植格；逐格 `/种植` 保留。
 
 ## 炼器/精炼与装备属性（v3.3.3/v3.3.4）
-- **根因**：README 承诺"装备升级"但炼器从未实现 ⇒ 材料掉落无消耗；紫金沙曾全仓库仅 `items.json` 一处 = 死内容。**新增**：`forge_recipes.json`(8档配方,九霄帝剑耗紫金沙×5)、`forge_config.json`(精炼:max10/每星+10%/成功率85-5×星下限20/≥6星耗紫金沙)、`forge_manager.py`+`forge_handlers.py`(炼器配方/炼器/精炼)。**紫金沙闭环**：储物戒材料清单+高阶掉落表(weight4)+顶层配方硬消耗。
-- **精炼接入战力**：`calculate_equipment_bonus` 加可选 `refine_map`；5 个战斗入口串联 `db.get_refine_map`：combat_handlers/boss_manager/impart_pk_manager/spirit_eye_manager。**DB**：`LATEST_DB_VERSION`=26 新增 `equipment_refine` 表（迁移+全新安装两处都改）；`data_manager` 加 get/set_refine_level、get_refine_map。
-- **⚠️ 战斗与面板必须共用 `models.resolve_equipment_attributes`**：items.json 有 10 件旧格式 `equip_effects` 法器（attack→物伤、defense→物防）。曾因战斗链只读新格式字段 ⇒ 旧装备「面板显示加成、战斗恒 0」（用户报告根因）。战斗链查找顺序=先 items 后 weapons（与 parse_item_from_name 一致）。
-- **⚠️ 新 manager/handler 必须登记 `__init__.py` 导出**：main.py 顶层 `from .handlers import X`，漏导出=**插件加载即崩**（ForgeHandlers/ForgeManager 曾漏）；manager 测试走合成包绕过 __init__ 全绿也抓不到，**必须跑 smoke_import.py**。
-- **⚠️ 面板精炼口径**：`get_total_attributes(..., refine_map, refine_per_star)` 武器/防具攻防 ×(1+star×per_star)、精神力/心法不放大、逐项 int(round)（round 银行家舍入）；排行/我的属性/我的装备均传 refine_map，不传参=旧行为。
-- **⚠️ 测试替身 `_DB` 须补 `get_refine_map`**（返回 `{}`），否则 spirit_eye/boss 测试 AttributeError；迁移断言用 `==26`。
+- **新增**：`forge_recipes.json`(8 档,九霄帝剑耗紫金沙×5)、`forge_config.json`(精炼 max10/每星+10%/成功率 85-5×星下限 20/≥6 星耗紫金沙)、`forge_manager.py`+`forge_handlers.py`。紫金沙闭环：储物戒材料+高阶掉落(weight4)+顶层配方硬消耗。
+- **精炼接入战力**：`calculate_equipment_bonus` 加可选 `refine_map`；5 个战斗入口串联 `db.get_refine_map`。**DB**：`LATEST_DB_VERSION`=26 新增 `equipment_refine` 表（迁移+全新安装两处都改）。
+- **⚠️ 战斗与面板必须共用 `models.resolve_equipment_attributes`**（items.json 有 10 件旧格式 `equip_effects` 法器：attack→物伤、defense→物防）。曾因战斗链只读新格式 ⇒ 旧装备「面板显示、战斗恒 0」。查找顺序=先 items 后 weapons。
+- **⚠️ 新 manager/handler 必须登记 `__init__.py` 导出**（main.py 顶层 import），漏导出=**插件加载即崩**；manager 测试走合成包绕过 `__init__` 抓不到 ⇒ **必须跑 smoke_import.py**。
+- **⚠️ 面板精炼口径**：`get_total_attributes(..., refine_map, refine_per_star)` 武器/防具攻防 ×(1+star×per_star)，精神力/心法不放大，逐项 int(round)；排行/我的属性/我的装备均传 refine_map。
+- **⚠️ 测试替身 `_DB` 须补 `get_refine_map`（返回 `{}`）**；迁移断言用 `==26`。
 
-## 图片模式（v3.3.5/v3.3.6）
+## 图片模式（v3.3.5/v3.3.6/v3.3.7）
 - `main.py` `on_decorating_result` 钩子 + `long_plain_text`：单条纯文本 ≥ `IMAGE_MODE_MIN_LENGTH`(300) 自动转图，富媒体/短文本不转。钩子内**禁 yield**，改 `event.get_result().chain`。
 - **⚠️ 组件判定用 type 名 `"Plain"`** ⇒ 测试 stub 类名必须叫 `Plain`/`Image`。官方 API 是 `self.text_to_image`/`self.html_render`/`event.image_result`，**无** `event.text_to_picture`。
-- **v3.3.6 美化**：`utils/panel_renderer.py::render_panel_html` 按行宽容解析（**绝不丢行**）→ 宣纸金模板 → 优先 `html_render(html,{},return_url=False)`，失败回退 `text_to_image`，再回退纯文本。**⚠️ html_render 用 Jinja2 渲染模板串** ⇒ CSS 全 class（勿用 id 防 `{#`）、模板禁 `{{`/`{%`；文本须转义；无冒号 `+数值` 行靠 `_emphasize`。
+- **v3.3.6 美化**：`utils/panel_renderer.py::render_panel_html` 按行宽容解析（**绝不丢行**）→ 仙侠模板 → 优先 `html_render(html,{},return_url=False)`，失败回退 `text_to_image`，再回退纯文本。**⚠️ html_render 用 Jinja2 渲染模板串** ⇒ CSS 全 class（勿用 id 防 `{#`）、模板禁 `{{`/`{%`；文本须转义；无冒号 `+数值` 行靠 `_emphasize`。
+- **v3.3.7 双主题**：`_CSS_THEME_PAPER`(宣纸金,默认)/`_CSS_THEME_GOLD`(玄金) 两套 `:root` CSS 变量 + 共享 `_CSS` 结构 ⇒ **同一 DOM 仅换配色**。配置 `VALUES.PANEL_THEME`(string, default `paper`)。**⚠️ 变量化重构须同步改 `_frame()`+4 个 `_render_*()` 形参+4 处调用点+入口分发，漏一处=主题不生效/TypeError**。
+- **⚠️ 预览页「无样式」= 预览脚本 bug，非用户机器**：摘 `render_panel_html` 产物时只取 `<body>` 会**丢掉自带 `<style>`** ⇒ 浏览器按裸文字渲染。**必须连 `<style>` 一起带，或用 iframe srcdoc 独立渲染**（与宿主 html_render 环境一致 + CSS 隔离；高度靠 JS 读 `contentDocument.body.scrollHeight` 自适应，srcdoc 同源可读）。
+- **⚠️ 用户偏好（设计）**：偏好**宣纸+金**第一版配色； dislikes "文字换底色"式逐行翻译排版。改面板视觉先确认主题取向。
 
 ## 工程约定
 
