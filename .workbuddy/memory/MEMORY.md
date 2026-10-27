@@ -44,6 +44,7 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **v3.3.11：只走本地 Playwright**。删除 Pillow 实现 `utils/image_generator.py`（v3.3.6 后已无调用）+ requirements 移除 Pillow ⇒ **零额外 Python 依赖**；`IMAGE_MODE_SKIP_REMOTE_FALLBACK` 默认 **true**（只走本地 `html_render`，本地不可用→纯文本，绝不连远程；自建本地 t2i 者可设 false）；`IMAGE_MODE_RENDER_TIMEOUT`（**整数秒**，默认 8，`int()` 取整 ⇒ 写 0.2 会变 0=不限时）兜底挂死。
 - 用户**已在本机装好 Playwright + Chromium**；⚠️ 关键前提：必须装在 **AstrBot 所用的那个 Python**（系统 python3 与 WorkBuddy 托管 venv 都不是），否则 `html_render` 仍会失败。判据：发 `/我的信息` 后日志**无** rcfortress 行 = 本地生效。
 - **v3.3.12 新增两个卡片布局**：丹药配方（`_parse_recipes`/`_render_recipe`，**单列**卡片：`#ID` 徽标 / 成功率右对齐 / 需求境界胶囊 / 破境丹「突破目标 ✅可炼 🔒未达境界」/ 材料按 `[,，、]` 拆项加粗）与储物戒（`_parse_storage`/`_render_storage`：戒名+品级徽标+**容量进度条**（复用 `_progress`）+ 分类双列物品格，`【x】空` → 「（空）」）。新 CSS 类 `.r-*`/`.st-*` 挂共享 `_CSS` ⇒ 双主题自动生效。⚠️ `_is_storage` 必须用 **「的储物戒」** 判定，以排除「储物戒列表」（升级候选，字段为「容量：N格 | 需求：境界」且多枚戒子，按主面板渲染会错位）。戒名括号全角/半角两种 ⇒ 正则用 `[（(]…[）)]`。
+- **v3.3.13 清晰度档位**：`IMAGE_MODE_QUALITY`（`main.py::_quality_level`），宿主合法值 **normal=1.0/high=1.3/ultra=1.8**；默认 **normal**（用户嫌慢），中文/数字别名容错，非法回退 normal+告警。主要收益在 PNG 体积（发送速度）而非渲染耗时。
 - **⚠️ 预览页「无样式」多为预览脚本 bug**：只取 `<body>` 会丢自带 `<style>` ⇒ 必须连 `<style>` 一起带或用 iframe srcdoc。
 - **⚠️ 内容比对断言**：数值被 `<b class="num">` 包裹 ⇒ 比对前须 `re.sub(r"<[^>]+>","",html)` 去标签。
 - **⚠️ 断言「走了哪个布局」必须匹配 `class="xxx"` 属性，不能匹配类名子串**：类名同时存在于 `<style>`（如 `.r-list{`）⇒ `"r-list" in html` **恒真**、假阳性。且角色卡输出是 `class="dname gold-t"`，精确写 `class="dname"` 反而落空 ⇒ 用 `'class="r-list"' in html`。

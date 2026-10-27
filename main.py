@@ -216,6 +216,32 @@ def long_plain_text(chain, min_len: int):
     return text if len(text) >= min_len else None
 
 
+# v3.3.13：转图清晰度档位 ⇒ 宿主 device_scale_factor_level 的合法取值
+#   normal = 设备像素比 1.0（最快、图最小，也是宿主 t2i 服务的默认档）
+#   high   = 1.3（v3.3.13 之前的固定值）
+#   ultra  = 1.8（最锐利，渲染与传输最慢）
+_QUALITY_LEVELS = ("normal", "high", "ultra")
+# 允许中文/数字别名，容错用户输入
+_QUALITY_ALIASES = {
+    "normal": "normal", "1": "normal", "1.0": "normal", "标准": "normal", "普通": "normal",
+    "high": "high", "1.3": "high", "高清": "high", "清晰": "high",
+    "ultra": "ultra", "1.8": "ultra", "超清": "ultra", "极致": "ultra",
+}
+DEFAULT_QUALITY = "normal"
+
+
+def _quality_level(values: dict) -> str:
+    """读 IMAGE_MODE_QUALITY 并归一化成宿主合法档位；非法/为空一律回落默认档。"""
+    raw = str(values.get("IMAGE_MODE_QUALITY", DEFAULT_QUALITY) or DEFAULT_QUALITY)
+    raw = raw.strip().lower()
+    if raw in _QUALITY_ALIASES:
+        return _QUALITY_ALIASES[raw]
+    if raw in _QUALITY_LEVELS:
+        return raw
+    logger.warning(f"[面板美化] 未知的 IMAGE_MODE_QUALITY={raw!r}，回退默认 {DEFAULT_QUALITY}")
+    return DEFAULT_QUALITY
+
+
 def _render_options(values: dict):
     """v3.3.9：面板转图的渲染选项（传给宿主 t2i 服务的 Playwright 截图参数）。
 
@@ -232,7 +258,11 @@ def _render_options(values: dict):
     这正是「消除大面积留白」的机制，而非根因；根因是此前未约束视口高度。
     若你的渲染器对 full_page 支持异常（仍出现整页空白），可在配置里关掉
     ``IMAGE_MODE_FULL_PAGE`` ⇒ 改用固定视口截图（给足高度避免截断常见面板）。
-    ``device_scale_factor_level`` 提高设备像素比（high=1.3x）⇒ 文字更锐利。
+
+    **关于清晰度（v3.3.13 可配）**：``device_scale_factor_level`` = 设备像素比，
+    直接决定出图像素量与体积——像素越多，渲染越慢、图越大、发送也越慢。
+    三档：normal=1.0x（默认，最快）/ high=1.3x / ultra=1.8x（最锐利最慢）。
+    觉得转图慢就把 ``IMAGE_MODE_QUALITY`` 设为 ``normal``。
 
     兼容性：这些键都是 Playwright 截图 API 的标准参数，服务端 Pydantic 模型会忽略
     不认识的键 ⇒ 老版本服务也能正常工作（此时退化为默认效果，不会报错）。
@@ -241,7 +271,8 @@ def _render_options(values: dict):
     opts = {
         "type": "png",                       # 无损，文字锐利（替代 jpeg quality=40）
         "viewport_width": PANEL_WIDTH,       # 视口 = 面板宽，消除右侧空白色块
-        "device_scale_factor_level": "high",  # 1.3x 像素比，细节更清晰
+        # v3.3.13：清晰度可配，默认 normal(1.0x) 换取渲染/传输速度
+        "device_scale_factor_level": _quality_level(values),
     }
     if full_page:
         # 整页截图：按面板实际内容高度裁剪——短内容不补空白、超长面板不截断。
