@@ -5,6 +5,7 @@ from pathlib import Path
 from astrbot.api import logger, AstrBotConfig
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.event import AstrMessageEvent, filter
+from astrbot.api.message_components import Image
 from .data import DataBase, MigrationManager
 from .config_manager import ConfigManager
 from .handlers import (
@@ -179,6 +180,25 @@ CMD_SPIRIT_EYE_RELEASE = "释放灵眼"
 CMD_CALAMITY_INFO = "天灾"
 
 CMD_REBIRTH = "弃道重修"
+
+
+def long_plain_text(chain, min_len: int):
+    """v3.3.5：若消息链为「单条纯文本」且总长 ≥ min_len，返回该文本；否则返回 None。
+
+    含 At / 图片等富媒体组件的消息链不转换（避免破坏交互语义）。
+    用 type 名称判断而非 isinstance，保持本函数零依赖、可独立单测。
+    """
+    if not chain:
+        return None
+    parts = []
+    for comp in chain:
+        if type(comp).__name__ != "Plain":
+            return None
+        parts.append(getattr(comp, "text", "") or "")
+    text = "".join(parts)
+    return text if len(text) >= min_len else None
+
+
 class XiuXianPlugin(Star):
     """修仙插件 - 文字修仙游戏"""
 
@@ -1476,3 +1496,36 @@ class XiuXianPlugin(Star):
     async def handle_calamity_info(self, event: AstrMessageEvent):
         async for r in self.calamity_handlers.handle_calamity_info(event):
             yield r
+
+    # ===== v3.3.5 长文本自动转图片 =====
+    @filter.on_decorating_result()
+    async def convert_long_text_to_image(self, event: AstrMessageEvent):
+        """出站装饰钩子：把超长纯文本回复渲染成图片，缓解刷屏阅读压力。
+
+        - 开关：VALUES.IMAGE_MODE（默认开）；阈值：VALUES.IMAGE_MODE_MIN_LENGTH（默认 300 字）。
+        - 依赖宿主 AstrBot 已配置 html-render（Playwright）渲染器；
+          未配置或渲染失败时自动回退纯文本，行为与旧版一致。
+        - 短回复（确认/拒绝等）与含 At/图片的消息链不转换。
+        """
+        try:
+            values = self.config.get("VALUES", {}) or {}
+            if not values.get("IMAGE_MODE", True):
+                return
+            try:
+                min_len = int(values.get("IMAGE_MODE_MIN_LENGTH", 300))
+            except (TypeError, ValueError):
+                min_len = 300
+
+            result = event.get_result()
+            if result is None or not getattr(result, "chain", None):
+                return
+            text = long_plain_text(result.chain, min_len)
+            if text is None:
+                return
+
+            path = await self.text_to_image(text, return_url=False)
+            if not path:
+                return
+            result.chain = [Image.fromFileSystem(path)]
+        except Exception as e:
+            logger.warning(f"[长文本转图片] 渲染失败，本次回复回退纯文本: {e}")

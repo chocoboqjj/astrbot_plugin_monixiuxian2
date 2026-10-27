@@ -27,6 +27,18 @@
     "description": "核心数值配置",
     "type": "object",
     "items": {
+      "IMAGE_MODE": {
+        "description": "长文本回复自动转图片",
+        "type": "bool",
+        "default": true,
+        "hint": "开启后，超过字数阈值的纯文本回复（如我的属性、修仙帮助、排行榜等长面板）将自动渲染为图片发送，缓解刷屏阅读压力。需要宿主 AstrBot 已配置 html-render（Playwright）渲染器；未配置或渲染失败时自动回退为纯文本，不影响使用。短回复（确认/拒绝等）与含 @/图片的消息不受影响。"
+      },
+      "IMAGE_MODE_MIN_LENGTH": {
+        "description": "转图片的字数阈值",
+        "type": "int",
+        "default": 300,
+        "hint": "单条纯文本回复超过该字数才会渲染为图片。默认 300；调小会让更多回复转图片，调大则只有超长面板转图片。仅在「长文本回复自动转图片」开启时生效。"
+      },
       "INITIAL_GOLD": {
         "description": "初始灵石",
         "type": "int",

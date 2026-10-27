@@ -4,7 +4,7 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.3.4  
+> **版本:** v3.3.5  
 > **许可证:** AGPL-3.0  
 > **作者:** xiaojuwa  
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -323,6 +323,7 @@
 | `ACCESS_CONTROL` | 白名单群、商店管理员、Boss 管理员 | 访问控制 |
 | `BANK`（v3.2.7 新增） | 存款/贷款利率与上限、贷款期限、`DEBT_INHERIT_MAX`、`DEBT_INHERIT_GRACE_DAYS` | 灵石银行；`DEBT_INHERIT_MAX` = 债务继承次数上限（默认 3，第 4 次死亡强制免除），`DEBT_INHERIT_GRACE_DAYS` = 转世后宽限期天数（默认 7）。设为 `DEBT_INHERIT_MAX: 0` 即完全退回「死亡即清债」旧行为 |
 | `CALAMITY`（v3.2.9 新增） | `ENABLED`、`INTERVAL`、`NO_EVENT_CHANCE`、`RATE_JITTER`、`SHIELD_CONSUMED_ON_BLOCK` | 天灾人祸；`INTERVAL` = 触发间隔秒数（默认 3600），`NO_EVENT_CHANCE` = 虚惊一场概率（默认 30%），`RATE_JITTER` = 扣减比例抖动幅度（默认 0.2 即 ±20%） |
+| `VALUES` 图片模式（v3.3.5 新增） | `IMAGE_MODE`、`IMAGE_MODE_MIN_LENGTH` | 长文本回复自动渲染为图片；`IMAGE_MODE` 默认开，`IMAGE_MODE_MIN_LENGTH` = 转图字数阈值（默认 300）。**需要宿主已配置 html-render（Playwright）渲染器**，未配置或渲染失败自动回退纯文本；短回复与含 @/图片的消息不受影响 |
 
 **注意**：修改配置后需重启 AstrBot 生效。
 
@@ -405,6 +406,23 @@ astrbot_plugin_monixiuxian2/
 - `managers/spirit_farm_manager.py` 新增 `plant_all(player, herb_name, count=None)`：把全部空种植格一次性种满指定灵草；省略 `count` 则填满所有空格，指定数量则只种 N 株。
 - `handlers/spirit_farm_handlers.py` 新增 `handle_plant_all`，兼容「灵草名 数量」同参写法。
 - `main.py` 新增指令 **`一键种植 <灵草名> [数量]`**（已登记修仙帮助与指令表）。
+
+---
+
+### v3.3.5 - 长文本回复自动转图片（缓解刷屏阅读压力）
+
+**✨ 新功能：`IMAGE_MODE` 长文本图片化**
+
+- **背景**：修仙帮助、我的属性、我的装备、排行榜等面板动辄数百字，群聊刷屏阅读困难。
+- **实现**：`main.py` 新增 `on_decorating_result` 出站装饰钩子——单条纯文本回复超过字数阈值（默认 300）时，自动调用宿主 `text_to_image` 渲染成图片发送；**一处实现，全插件指令生效**，无需改动任何 handler。
+- **体验细节**：
+  - 短回复（确认/拒绝/战斗结算等）保持文字，不干扰快速交互；
+  - 含 @ / 图片等富媒体的消息链不转换；
+  - **依赖宿主已配置 html-render（Playwright）渲染器**；未配置或渲染失败自动回退纯文本，行为与旧版完全一致（不会发不出消息）。
+- **配置**（AstrBot 配置面板 `VALUES` 组）：`IMAGE_MODE`（默认开）、`IMAGE_MODE_MIN_LENGTH`（默认 300，调小更多回复转图、调大只留超长面板）。
+- 修仙帮助尾部新增图片模式说明一行。
+
+**验证**：新增 `test_image_mode.py` 16 项断言（helper 判定、开关、阈值、渲染失败回退、富媒体排除、非法配置容错）全部通过；`smoke_import.py` ALL IMPORTS OK。
 
 ---
 
