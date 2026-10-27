@@ -27,6 +27,8 @@ from .dual_cultivation_handlers import DualCultivationHandlers
 from .spirit_eye_handlers import SpiritEyeHandlers
 # v3.2.9：天灾人祸
 from .calamity_handler import CalamityHandlers
+# v3.3.3：炼器系统
+from .forge_handlers import ForgeHandlers
 
 __all__ = [
     "PlayerHandler",
@@ -54,5 +56,7 @@ __all__ = [
     "DualCultivationHandlers",
     "SpiritEyeHandlers",
     # v3.2.9
-    "CalamityHandlers"
+    "CalamityHandlers",
+    # v3.3.3
+    "ForgeHandlers"
 ]

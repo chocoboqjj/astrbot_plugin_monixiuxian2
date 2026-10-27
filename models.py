@@ -7,6 +7,32 @@ import json
 if TYPE_CHECKING:
     from .config_manager import ConfigManager
 
+
+def resolve_equipment_attributes(config: dict) -> dict:
+    """统一解析装备配置的攻防属性（新旧格式兼容），面板与战斗链共用此口径。
+
+    新格式：physical_damage / magic_damage / physical_defense / magic_defense / mental_power
+    旧格式（items.json 法器）：equip_effects.attack -> 计入物伤；equip_effects.defense -> 计入物防
+    另兼容历史遗留的顶层 "atk" 键（当前配置未使用，仅防御性保留）。
+
+    ⚠️ 战斗链（CombatManager.calculate_equipment_bonus）与面板链
+    （EquipmentManager.parse_item_from_name）必须共用本函数，
+    否则会重现「面板显示加成、战斗却不生效」的两张皮缺陷（v3.3.4 修复）。
+    """
+    attrs = {
+        "physical_damage": config.get("atk", 0) + config.get("physical_damage", 0),
+        "magic_damage": config.get("magic_damage", 0),
+        "physical_defense": config.get("physical_defense", 0),
+        "magic_defense": config.get("magic_defense", 0),
+        "mental_power": config.get("mental_power", 0),
+    }
+    effects = config.get("equip_effects") or {}
+    if "attack" in effects:
+        attrs["physical_damage"] += effects["attack"]
+    if "defense" in effects:
+        attrs["physical_defense"] += effects["defense"]
+    return attrs
+
 @dataclass
 class Item:
     """装备物品模型"""
@@ -202,12 +228,15 @@ class Player:
         """设置储物戒物品"""
         self.storage_ring_items = json.dumps(items, ensure_ascii=False)
 
-    def get_total_attributes(self, equipped_items: List[Item], pill_multipliers: Optional[dict] = None) -> dict:
+    def get_total_attributes(self, equipped_items: List[Item], pill_multipliers: Optional[dict] = None,
+                             refine_map: Optional[dict] = None, refine_per_star: float = 0.10) -> dict:
         """计算包含装备加成和丹药效果的总属性
 
         Args:
             equipped_items: 已装备的物品列表
             pill_multipliers: 丹药属性倍率（可选）
+            refine_map: {装备名: 精炼星数}（可选），武器/防具攻防按星数放大
+            refine_per_star: 每星加成比例（与 forge_config.refine.per_star_bonus 一致）
 
         Returns:
             包含所有属性的字典
@@ -226,12 +255,17 @@ class Player:
             "exp_multiplier": 0.0,  # 基础修为倍率为0，只来自心法
         }
 
-        # 叠加装备属性
+        # 叠加装备属性（武器/防具按精炼星数放大攻防，与战斗链口径一致）
         for item in equipped_items:
-            total["magic_damage"] += item.magic_damage
-            total["physical_damage"] += item.physical_damage
-            total["magic_defense"] += item.magic_defense
-            total["physical_defense"] += item.physical_defense
+            mult = 1.0
+            if refine_map and item.item_type in ("weapon", "armor"):
+                star = refine_map.get(item.name, 0)
+                if star:
+                    mult = 1.0 + star * refine_per_star
+            total["magic_damage"] += int(round(item.magic_damage * mult))
+            total["physical_damage"] += int(round(item.physical_damage * mult))
+            total["magic_defense"] += int(round(item.magic_defense * mult))
+            total["physical_defense"] += int(round(item.physical_defense * mult))
             total["mental_power"] += item.mental_power
 
             # 心法专属属性

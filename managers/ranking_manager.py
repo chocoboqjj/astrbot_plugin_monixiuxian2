@@ -115,8 +115,15 @@ class RankingManager:
                 self.config_manager.weapons_data
             )
             
-            # 排行榜显示基础战力，不含临时丹药效果（更公平）
-            total_attrs = player.get_total_attributes(equipped_items, None)
+            # 排行榜显示基础战力，不含临时丹药效果（更公平）；
+            # v3.3.4：精炼为持久投入，与面板/战斗链口径一致，计入排行
+            refine_map = await self.db.get_refine_map(player.user_id)
+            refine_per_star = 0.10
+            forge_cfg = getattr(self.config_manager, "forge_config", None)
+            if forge_cfg:
+                refine_per_star = forge_cfg.get("refine", {}).get("per_star_bonus", 0.10)
+            total_attrs = player.get_total_attributes(
+                equipped_items, None, refine_map, refine_per_star)
 
             # 与玩家面板共用统一战力公式（含 HP/暴击/精神力）
             impart_info = await self.db.ext.get_impart_info(player.user_id)

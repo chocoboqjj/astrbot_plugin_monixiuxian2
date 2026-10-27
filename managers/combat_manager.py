@@ -8,6 +8,8 @@ import random
 from typing import Tuple, Dict, Optional, List, TYPE_CHECKING
 from dataclasses import dataclass
 
+from ..models import resolve_equipment_attributes
+
 if TYPE_CHECKING:
     from ..models import Player
 
@@ -115,15 +117,26 @@ class CombatManager:
             star = refine_map.get(item_name, 0)
             return 1.0 + star * per_star
 
-        if player.weapon and player.weapon in config_manager.weapons_data:
-            data = config_manager.weapons_data[player.weapon]
-            atk = data.get("atk", 0) + data.get("physical_damage", 0) + data.get("magic_damage", 0)
-            bonus["atk"] += int(round(atk * _mult(player.weapon)))
+        # 统一查找顺序（与 EquipmentManager.parse_item_from_name 一致：先 items 后 weapons）
+        items_data = getattr(config_manager, "items_data", None) or {}
+        weapons_data = getattr(config_manager, "weapons_data", None) or {}
 
-        if player.armor and player.armor in config_manager.items_data:
-            data = config_manager.items_data[player.armor]
-            defense = data.get("physical_defense", 0) + data.get("magic_defense", 0)
-            bonus["defense"] += int(round(defense * _mult(player.armor)))
+        if player.weapon:
+            data = items_data.get(player.weapon) or weapons_data.get(player.weapon)
+            if data:
+                # v3.3.4：与面板共用 resolve_equipment_attributes，
+                # 修复旧格式（equip_effects.attack）与 items 侧武器不生效的缺陷
+                attrs = resolve_equipment_attributes(data)
+                atk = attrs["physical_damage"] + attrs["magic_damage"]
+                bonus["atk"] += int(round(atk * _mult(player.weapon)))
+
+        if player.armor:
+            data = items_data.get(player.armor) or weapons_data.get(player.armor)
+            if data:
+                # v3.3.4：修复旧格式（equip_effects.defense）防具防御不生效的缺陷
+                attrs = resolve_equipment_attributes(data)
+                defense = attrs["physical_defense"] + attrs["magic_defense"]
+                bonus["defense"] += int(round(defense * _mult(player.armor)))
 
         return bonus
 

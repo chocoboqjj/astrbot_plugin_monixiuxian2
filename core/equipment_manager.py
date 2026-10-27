@@ -1,7 +1,7 @@
 # core/equipment_manager.py
 
 from typing import Optional, List, Dict, TYPE_CHECKING
-from ..models import Player, Item
+from ..models import Player, Item, resolve_equipment_attributes
 from ..data import DataBase
 
 if TYPE_CHECKING:
@@ -50,24 +50,15 @@ class EquipmentManager:
         if not item_config:
             return None
 
-        # 处理新旧格式兼容性
+        # 处理新旧格式兼容性（v3.3.4：与战斗链共用统一口径 resolve_equipment_attributes）
         item_type = item_config.get("type", "")
-        physical_damage = item_config.get("physical_damage", 0)
-        physical_defense = item_config.get("physical_defense", 0)
-        magic_damage = item_config.get("magic_damage", 0)
-        magic_defense = item_config.get("magic_defense", 0)
-        mental_power = item_config.get("mental_power", 0)
-
-        # 旧格式兼容：处理 items.json 中的法器（equip_effects 格式）
-        if "equip_effects" in item_config:
-            equip_effects = item_config["equip_effects"]
-            # 旧格式 attack -> physical_damage
-            if "attack" in equip_effects:
-                physical_damage = equip_effects["attack"]
-            # 旧格式 defense -> physical_defense
-            if "defense" in equip_effects:
-                physical_defense = equip_effects["defense"]
-            # 旧格式 max_hp 可用于体修的 blood_qi 加成
+        resolved = resolve_equipment_attributes(item_config)
+        physical_damage = resolved["physical_damage"]
+        physical_defense = resolved["physical_defense"]
+        magic_damage = resolved["magic_damage"]
+        magic_defense = resolved["magic_defense"]
+        mental_power = resolved["mental_power"]
+        # 旧格式 max_hp 可用于体修的 blood_qi 加成
 
         # 旧格式兼容：处理类型映射
         # "法器" + subtype="武器" -> "weapon"

@@ -4,7 +4,7 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.3.3  
+> **版本:** v3.3.4  
 > **许可证:** AGPL-3.0  
 > **作者:** xiaojuwa  
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -405,6 +405,28 @@ astrbot_plugin_monixiuxian2/
 - `managers/spirit_farm_manager.py` 新增 `plant_all(player, herb_name, count=None)`：把全部空种植格一次性种满指定灵草；省略 `count` 则填满所有空格，指定数量则只种 N 株。
 - `handlers/spirit_farm_handlers.py` 新增 `handle_plant_all`，兼容「灵草名 数量」同参写法。
 - `main.py` 新增指令 **`一键种植 <灵草名> [数量]`**（已登记修仙帮助与指令表）。
+
+---
+
+### v3.3.4 - 修复装备属性「面板显示、战斗不生效」+ 插件加载崩溃
+
+**🐛 修复 1：旧格式装备在战斗中属性完全失效（用户报告「装备属性没加到人物上」）**
+
+- **根因**：`items.json` 中 10 件法器（4 武器 + 4 防具，如玄铁甲、青锋剑）使用旧格式 `equip_effects: {attack/defense}`。面板链 `parse_item_from_name` 有旧格式兼容，但战斗链 `calculate_equipment_bonus` 只读新格式字段（`physical_damage` 等）且武器只查 `weapons.json` ⇒ **旧格式防具战斗防御恒 0、旧格式武器战斗攻击恒 0**。玩家穿戴后面板显示加成、一进战斗（决斗/Boss/传承/灵眼争夺）却不生效。
+- **修复**：抽出统一解析函数 `models.resolve_equipment_attributes`（新旧格式同一口径），战斗链与面板链共用，杜绝「两张皮」再次漂移；战斗链查找顺序与面板对齐（先 items 后 weapons）。
+
+**🐛 修复 2：面板/排行榜不显示精炼加成**
+
+- `Player.get_total_attributes` 新增可选 `refine_map`/`refine_per_star` 参数：武器/防具攻防按精炼星数放大（与战斗链同口径），心法/功法/精神力不受影响。
+- `/我的属性`、`/我的装备`、战力排行榜均传入 `get_refine_map`——精炼投入现在全场景可见。向后兼容：不传参行为与旧版完全一致。
+
+**🐛 修复 3（致命）：`handlers/__init__.py` / `managers/__init__.py` 漏导出炼器模块**
+
+- v3.3.3 的 `ForgeHandlers`/`ForgeManager` 未加入两个包的 `__init__.py` 导出，而 `main.py` 顶层 `from .handlers import ForgeHandlers` ⇒ **插件加载即崩**。已补齐导出。
+
+**文件改动**：`models.py`、`managers/combat_manager.py`、`core/equipment_manager.py`、`handlers/player_handler.py`、`handlers/equipment_handler.py`、`managers/ranking_manager.py`、`handlers/__init__.py`、`managers/__init__.py`。
+
+**验证**：新增 `test_equip_attr_fix.py` 19 项断言（旧格式战斗链/新格式不回归/精炼面板/双链一致）；全量回归 forge_refine 23、spirit_eye 55、boss_e2e 17、boss_limit 50、legacy 45、breakthrough 20、calamity 33、drop_existence 110 全部通过；`smoke_import.py` ALL IMPORTS OK。
 
 ---
 

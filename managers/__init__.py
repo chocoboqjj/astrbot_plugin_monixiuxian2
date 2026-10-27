@@ -18,6 +18,8 @@ from .dual_cultivation_manager import DualCultivationManager
 from .spirit_eye_manager import SpiritEyeManager
 # v3.2.9：天灾人祸
 from .calamity_manager import CalamityManager
+# v3.3.3：炼器系统
+from .forge_manager import ForgeManager
 
 __all__ = [
     "CombatManager",
@@ -38,5 +40,7 @@ __all__ = [
     "DualCultivationManager",
     "SpiritEyeManager",
     # v3.2.9
-    "CalamityManager"
+    "CalamityManager",
+    # v3.3.3
+    "ForgeManager"
 ]

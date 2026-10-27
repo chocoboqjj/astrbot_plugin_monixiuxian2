@@ -142,7 +142,7 @@ class PlayerHandler:
         await self.pill_manager.update_temporary_effects(player)
         pill_multipliers = self.pill_manager.calculate_pill_attribute_effects(player)
 
-        # 获取装备加成后的属性
+        # 获取装备加成后的属性（v3.3.4：含精炼星数，与战斗链口径一致）
         from ..core import EquipmentManager
         equipment_manager = EquipmentManager(self.db, self.config_manager)
         equipped_items = equipment_manager.get_equipped_items(
@@ -150,7 +150,11 @@ class PlayerHandler:
             self.config_manager.items_data,
             self.config_manager.weapons_data
         )
-        total_attrs = player.get_total_attributes(equipped_items, pill_multipliers)
+        refine_map = await self.db.get_refine_map(player.user_id)
+        refine_per_star = self.config_manager.forge_config.get("refine", {}).get(
+            "per_star_bonus", 0.10) if getattr(self.config_manager, "forge_config", None) else 0.10
+        total_attrs = player.get_total_attributes(
+            equipped_items, pill_multipliers, refine_map, refine_per_star)
 
         # 图片生成暂时禁用（缺少资源文件会导致效果很差）
         # 直接使用优化后的文本格式显示

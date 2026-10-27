@@ -58,7 +58,12 @@ class EquipmentHandler:
         # 总属性加成
         if equipped_items:
             equipment_lines.append("\n--- 装备属性加成 ---\n")
-            total_attrs = player.get_total_attributes(equipped_items, pill_multipliers)
+            # v3.3.4：含精炼星数，与战斗链口径一致
+            refine_map = await self.db.get_refine_map(player.user_id)
+            refine_per_star = self.config_manager.forge_config.get("refine", {}).get(
+                "per_star_bonus", 0.10) if getattr(self.config_manager, "forge_config", None) else 0.10
+            total_attrs = player.get_total_attributes(
+                equipped_items, pill_multipliers, refine_map, refine_per_star)
 
             # 计算加成值（总属性 - 基础属性）
             magic_damage_bonus = total_attrs["magic_damage"] - player.magic_damage
