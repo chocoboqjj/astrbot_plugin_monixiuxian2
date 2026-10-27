@@ -113,3 +113,10 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **导入项目模块需先 mock `astrbot`**，并**预注册合成 `xx_plugin.managers`/`xx_plugin.core`/`xx_plugin.handlers` 包**（`__path__` 指向目录）绕开各自 `__init__.py`；mock 需补 `AstrBotConfig`/`logger`/`all.At`。**⚠️ 先导 `data` 再导 `config_manager`**。
 - **aiosqlite 三个坑**：①内存库必须 `conn.row_factory=aiosqlite.Row`；②**测试结束必须 `await conn.close()`**，否则后台线程挂起被 SIGTERM（exit 137）；③INTEGER 0/1 读回是 **int 不是 bool**（断言用真值判断）。
 - **`bank_manager.borrow/repay` 内部会重读玩家** ⇒ 测试须把玩家放回 `db.players`。**断言"已封顶/已生效"前须确认前置条件成立**，否则断言恒真。
+
+## ⚠️ 图片模式作用域（v3.3.9 关键）
+- **AstrBot 的 `@filter.on_decorating_result()` 在流水线 `ResultDecorateStage` *全局触发***——会对**所有**经过管线的出站消息生效（含其它插件的长文本 / LLM·Agent 回复），**不是**只作用于本插件。本插件曾因此把别的插件的回复也转成图片。
+- **限定本插件的作用域手法**：在指令入口装饰器 `require_whitelist`（包 main.py 全部 `@filter.command`）与 `player_required`（包各 handler 方法）里给 `event` 打标记 `event._xiuxian_owns = True`；转图钩子开头 `if not getattr(event, "_xiuxian_owns", False): return`。**⚠️ 同一 event 对象在命令处理与装饰钩子间是同一个实例**，故标记可读；每个入站消息都是新 event，无跨消息串扰。
+- **「整页截图空白」根因**：渲染器默认视口（如 720px）整页截图 ⇒ 内容不足的短面板被补成大片空白。修复：整页截图时把 `viewport_height` 压到极小（10px），Playwright 按面板**实际内容高度**裁剪（短内容不补空白、超长不截断）。**`full_page=True` 恰恰是无空白的机制**，关掉它（False+固定视口）反而可能补空白或截断 ⇒ 默认保持 true，仅暴露 `IMAGE_MODE_FULL_PAGE` 开关供个别渲染器异常时关闭。
+- **device_scale_factor_level**：`ultra`(1.8x) 不如 `high`(1.3x) 稳，已改 high。
+- 测试见 `/tmp/xx_test/test_image_mode.py`（A helper / B 钩子 / C 回退 / D 渲染选项 / E full_page 开关 / F 仅本插件守卫 / G 入口标记断言）。
