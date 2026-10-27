@@ -21,7 +21,7 @@ import re
 from typing import Optional
 
 # ---------- 行/结构正则 ----------
-_SEP_RE = re.compile(r"^\s*[━═─]{4,}\s*$")
+_SEP_RE = re.compile(r"^\s*[━═─=]{4,}\s*$")
 _DASH_SEC_RE = re.compile(r"^\s*-{2,}\s*(.+?)\s*-{2,}\s*$")       # --- 段名 ---
 _TITLE_EQ_RE = re.compile(r"^\s*=+\s*(.+?)\s*=+\s*$")
 _SLOT_RE = re.compile(r"^\s*【(.+?)】\s*(.*)$")                    # 【槽】内容
@@ -135,6 +135,13 @@ body{width:var(--w);background:var(--bg);
 .num{color:var(--accent);font-weight:700}
 .gap{height:7px}
 
+/* ---- 装饰性分隔线（替代原文粗黑实线）---- */
+.p-div{display:flex;align-items:center;gap:6px;margin:11px 2px;opacity:.85}
+.p-div i{height:1px;flex:1;background:linear-gradient(90deg,transparent,var(--sec-line))}
+.p-div i:last-child{background:linear-gradient(90deg,var(--sec-line),transparent)}
+.p-div s{width:5px;height:5px;background:var(--gold-soft);transform:rotate(45deg);flex-shrink:0;
+         display:block;border-radius:1px}
+
 /* ---- hero / 徽章 ---- */
 .hero{text-align:center;padding:2px 0 6px}
 .h-deco{font-size:9px;color:var(--gold-soft);letter-spacing:8px;padding-bottom:4px}
@@ -226,6 +233,16 @@ def _esc(s: str) -> str:
 
 def _emph(escaped: str) -> str:
     return _NUM_RE.sub(r'<b class="num">\1</b>', escaped)
+
+
+def _is_sep(raw: str) -> bool:
+    """判断是否为纯分隔线行（━━━ / ==== / ---- / ────）。"""
+    return bool(_SEP_RE.match(raw)) or bool(re.match(r"^[━═─=-]{4,}$", raw))
+
+
+def _div_html() -> str:
+    """装饰性分隔线（菱形节点 + 渐隐横线），替代原文里的粗黑实线。"""
+    return '<div class="p-div"><i></i><s></s><i></i></div>'
 
 
 def _frame(title_html: str, body: str, theme: str = DEFAULT_THEME) -> str:
@@ -439,7 +456,7 @@ def _render_player(title, sections, theme: str = DEFAULT_THEME) -> str:
         rows = "".join(
             f'<div class="row"><span class="k">{_esc(k)}</span>'
             f'<span class="{_vc(v)}">{_emph(_esc(v))}</span></div>' if k else
-            f'<div class="li">{_emph(_esc(v))}</div>'
+            (_div_html() if _is_sep(v) else f'<div class="li">{_emph(_esc(v))}</div>')
             for k, v in misc)
         h.append(f'<div class="misc">{rows}</div>')
 
@@ -527,7 +544,8 @@ def _render_equip(title, sections, theme: str = DEFAULT_THEME) -> str:
         rows = "".join(
             f'<div class="row"><span class="k">{_esc(k)}</span>'
             f'<span class="{_vc(v)}">{_emph(_esc(v))}</span></div>' if k else
-            f'<div class="li">{_emph(_esc(v))}</div>' for k, v in misc)
+            (_div_html() if _is_sep(v) else f'<div class="li">{_emph(_esc(v))}</div>')
+            for k, v in misc)
         h.append(f'<div class="misc">{rows}</div>')
 
     return _frame("", "".join(h), theme)
@@ -557,6 +575,9 @@ def _render_help(title, sections, theme: str = DEFAULT_THEME) -> str:
                 txt = _esc(m.group(1))
                 cls = "sub warn" if ("⚠" in txt or "逾期" in txt or "死亡" in txt or "清除" in txt) else "sub"
                 rows.append(f'<div class="{cls}">└─ {txt}</div>')
+                continue
+            if _is_sep(raw):
+                rows.append(_div_html())
                 continue
             m = _ARROW_RE.match(raw)
             if m and len(m.group(1)) <= 30:
@@ -615,8 +636,8 @@ def _render_generic(title, sections, theme: str = DEFAULT_THEME) -> str:
                 cls = "sub warn" if ("⚠" in txt or "逾期" in txt or "死亡" in txt) else "sub"
                 r_buf.append(f'<div class="{cls}">└─ {txt}</div>')
                 continue
-            if re.match(r"^[━═─-]{4,}$", raw):
-                r_buf.append('<div class="p-div"><i></i><s></s><i></i></div>')
+            if _is_sep(raw):
+                r_buf.append(_div_html())
                 continue
             cls = "li warn" if ("⚠" in raw or "逾期" in raw or "致死" in raw) else "li"
             r_buf.append(f'<div class="{cls}">{_emph(_esc(raw))}</div>')
