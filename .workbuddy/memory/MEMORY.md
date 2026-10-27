@@ -48,8 +48,7 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **判定顺序**虚惊一场→护盾免疫→实际扣减（虚惊不消耗护盾）。**境界地板**：`experience` 不清零，下限=`exp_needed[level_index]`。**绝不致死**：只扣 gold/experience。定魂丹 `has_debuff_shield` 首个消费点。新增表 `calamity_records`(v25)+`calamity_config.json`+`CALAMITY`。
 
 ## 遗留缺陷修复包（v3.3.0/3.3.1，细节见 2026-10-23 日志）
-- **丹药表以「名称」为键** ⇒ 同名静默覆盖；跨表（新丹药系统 vs `items.json`）共享命名空间须查重。
-- **`shop_weight=0` 排雷**：`_weighted_random_choice` 在 `len<=count` 时直返全部候选；`generate_pavilion_items` 须按 `shop_weight>0` 硬过滤。
+- **丹药表以「名称」为键** ⇒ 同名静默覆盖；跨表共享命名空间须查重。**`shop_weight=0` 排雷**：`_weighted_random_choice` 在 `len<=count` 时直返全部候选；`generate_pavilion_items` 须按 `shop_weight>0` 硬过滤。
 - **`permanent_pill_gains` 顶层可能有标量键（BASE_LIMIT_KEY）** ⇒ 遍历 `.values()` 必须 `isinstance(x,dict)`；`base_attribute_limit_increase` 是倍率提升永久增益上限、不提供属性、须走独立分支。
 - **跨系上限兜底在代码层、境界表零改动**（突破各系只读自己能量字段）。**改名须覆盖全部掉落表**（v3.3.1 玄铁→精铁漏两张 ⇒ 幽灵物品）；`test_drop_item_existence.py` 改材料名必跑。
 
@@ -65,6 +64,10 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **⚠️ 新 manager/handler 必须登记 `__init__.py` 导出**：main.py 顶层 `from .handlers import X`，漏导出=**插件加载即崩**（ForgeHandlers/ForgeManager 曾漏）；manager 测试走合成包绕过 __init__ 全绿也抓不到，**必须跑 smoke_import.py**。
 - **⚠️ 面板精炼口径**：`get_total_attributes(..., refine_map, refine_per_star)` 武器/防具攻防 ×(1+star×per_star)、精神力/心法不放大、逐项 int(round)（round 银行家舍入）；排行/我的属性/我的装备均传 refine_map，不传参=旧行为。
 - **⚠️ 测试替身 `_DB` 须补 `get_refine_map`**（返回 `{}`），否则 spirit_eye/boss 测试 AttributeError；迁移断言用 `==26`。
+
+## 图片模式（v3.3.5）
+- `main.py` `on_decorating_result` 钩子 + `long_plain_text`：单条纯文本 ≥ `IMAGE_MODE_MIN_LENGTH`(300) 自动 `text_to_image(text, return_url=False)` 转图，失败/未配置 html-render 回退纯文本；富媒体/短文本不转。钩子内**禁 yield**，改 `event.get_result().chain`。
+- **⚠️ 组件判定用 type 名 `"Plain"`** ⇒ 测试 stub 类名必须叫 `Plain`/`Image`。官方 API 是 `self.text_to_image`/`event.image_result`，**无** `event.text_to_picture`。
 
 ## 工程约定
 - 按 AGENTS.md：功能更新/BUG 修复需同步 README.md、metadata.yaml 版本号、misc_handler.py 修仙帮助；新增玩家可见指令需登记 README 指令表与帮助。
