@@ -237,7 +237,9 @@ ATK：{atk}
         atk_buff = impart_info.impart_atk_per if impart_info else 0.0
         crit_rate_buff = impart_info.impart_know_per if impart_info else 0.0
 
-        equip = CombatManager.calculate_equipment_bonus(self.config_manager, player)
+        equip = CombatManager.calculate_equipment_bonus(
+            self.config_manager, player, await self.db.get_refine_map(player.user_id)
+        )
         player_stats = CombatManager.calculate_combat_stats(
             player, impart_info, equip["atk"], equip["defense"]
         )

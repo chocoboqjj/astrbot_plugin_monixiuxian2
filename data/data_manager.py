@@ -4,7 +4,7 @@ import aiosqlite
 import json
 from dataclasses import fields
 from pathlib import Path
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Dict
 from astrbot.api import logger
 from ..models import Player
 from .database_extended import DatabaseExtended
@@ -170,6 +170,36 @@ class DataBase:
                 filtered_data = {k: v for k, v in dict(row).items() if k in PLAYER_FIELDS}
                 return Player(**filtered_data)
             return None
+
+    # ===== 炼器精炼记录（v3.3.3） =====
+    async def get_refine_level(self, user_id: str, item_name: str) -> int:
+        """获取某玩家某装备的精炼星数（无记录视为 0）"""
+        async with self.conn.execute(
+            "SELECT refine_level FROM equipment_refine WHERE user_id = ? AND item_name = ?",
+            (user_id, item_name)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return int(row["refine_level"]) if row else 0
+
+    async def set_refine_level(self, user_id: str, item_name: str, level: int) -> None:
+        """写入/更新某玩家某装备的精炼星数"""
+        await self.conn.execute(
+            "INSERT INTO equipment_refine (user_id, item_name, refine_level) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id, item_name) DO UPDATE SET refine_level = excluded.refine_level",
+            (user_id, item_name, int(level))
+        )
+        await self.conn.commit()
+
+    async def get_refine_map(self, user_id: str) -> Dict[str, int]:
+        """获取某玩家的全部精炼记录，返回 {item_name: refine_level}"""
+        result: Dict[str, int] = {}
+        async with self.conn.execute(
+            "SELECT item_name, refine_level FROM equipment_refine WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            async for row in cursor:
+                result[row["item_name"]] = int(row["refine_level"])
+        return result
 
     async def update_player(self, player: Player, commit: bool = True):
         """更新玩家信息

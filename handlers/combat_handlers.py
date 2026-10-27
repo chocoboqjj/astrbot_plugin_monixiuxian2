@@ -63,26 +63,15 @@ class CombatHandlers:
         """解析目标用户ID（兼容 OneBot 与 QQ 官方机器人）。"""
         return extract_target_id(event, arg)
 
-    def _calculate_equipment_bonus(self, player) -> dict:
-        """计算装备提供的属性加成"""
-        bonus = {"atk": 0, "defense": 0}
-        if not self.config_manager:
-            return bonus
-            
-        # 武器
-        if player.weapon and player.weapon in self.config_manager.weapons_data:
-            data = self.config_manager.weapons_data[player.weapon]
-            bonus["atk"] += data.get("atk", 0)
-            bonus["atk"] += data.get("physical_damage", 0)
-            bonus["atk"] += data.get("magic_damage", 0)
-        
-        # 防具
-        if player.armor and player.armor in self.config_manager.items_data:
-            data = self.config_manager.items_data[player.armor]
-            bonus["defense"] += data.get("physical_defense", 0)
-            bonus["defense"] += data.get("magic_defense", 0)
-            
-        return bonus
+    async def _calculate_equipment_bonus(self, player) -> dict:
+        """计算装备提供的属性加成（含精炼升星放大）
+
+        委托给 CombatManager.calculate_equipment_bonus，避免与决斗/传承逻辑分散。
+        """
+        refine_map = {}
+        if self.db:
+            refine_map = await self.db.get_refine_map(player.user_id)
+        return CombatManager.calculate_equipment_bonus(self.config_manager, player, refine_map)
 
     async def _prepare_combat_stats(self, user_id: str) -> CombatStats:
         player = await self.db.get_player_by_id(user_id)
@@ -100,8 +89,8 @@ class CombatHandlers:
         hp, mp = self.combat_mgr.calculate_hp_mp(player.experience, hp_buff, mp_buff)
         base_atk = self.combat_mgr.calculate_atk(player.experience, player.atkpractice, atk_buff)
         
-        # 加上装备加成
-        equip_bonus = self._calculate_equipment_bonus(player)
+        # 加上装备加成（含精炼）
+        equip_bonus = await self._calculate_equipment_bonus(player)
         final_atk = base_atk + equip_bonus["atk"]
         
         # 更新Player对象（可选，为了持久化）

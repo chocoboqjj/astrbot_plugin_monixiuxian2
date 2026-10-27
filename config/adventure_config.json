@@ -234,7 +234,8 @@
       { "name": "星辰石", "weight": 25, "min": 1, "max": 2 },
       { "name": "灵兽内丹", "weight": 20, "min": 1, "max": 1 },
       { "name": "功法残页", "weight": 15, "min": 1, "max": 1 },
-      { "name": "天材地宝", "weight": 10, "min": 1, "max": 1 }
+      { "name": "天材地宝", "weight": 10, "min": 1, "max": 1 },
+      { "name": "紫金沙", "weight": 4, "min": 1, "max": 1 }
     ]
   }
 }

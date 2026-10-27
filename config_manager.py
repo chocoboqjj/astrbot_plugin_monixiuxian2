@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from astrbot.api import logger
-from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG, CALAMITY_CONFIG
+from .data.default_configs import SECT_CONFIG, BOSS_CONFIG, RIFT_CONFIG, ALCHEMY_CONFIG, CALAMITY_CONFIG, FORGE_CONFIG
 
 class ConfigManager:
     """配置管理器，加载境界、物品、武器和丹药配置"""
@@ -26,6 +26,8 @@ class ConfigManager:
         self.alchemy_config: Dict[str, Any] = {}
         # v3.2.9：天灾人祸配置
         self.calamity_config: Dict[str, Any] = {}
+        # v3.3.3：炼器（装备打造 + 精炼升星）配置
+        self.forge_config: Dict[str, Any] = {}
         
         self._load_all()
 
@@ -138,6 +140,9 @@ class ConfigManager:
         # v3.2.9：天灾人祸配置
         self.calamity_config = self._load_config_with_default(config_dir / "calamity_config.json", CALAMITY_CONFIG)
         self.alchemy_recipes = self._load_items_data(config_dir / "alchemy_recipes.json")
+        # v3.3.3：炼器（装备打造 + 精炼升星）配置
+        self.forge_config = self._load_config_with_default(config_dir / "forge_config.json", FORGE_CONFIG)
+        self.forge_recipes = self._load_items_data(config_dir / "forge_recipes.json")
         
         # 加载游戏配置（包含各系统的硬编码参数）
         self.game_config = self._load_config_with_default(config_dir / "game_config.json", {})

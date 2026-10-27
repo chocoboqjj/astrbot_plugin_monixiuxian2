@@ -348,8 +348,12 @@ class SpiritEyeManager:
         # 战斗属性（与决斗 / 传承挑战共用唯一权威入口）
         atk_impart = await self.db.ext.get_impart_info(attacker.user_id)
         def_impart = await self.db.ext.get_impart_info(defender_id)
-        atk_equip = CombatManager.calculate_equipment_bonus(self.config_manager, attacker)
-        def_equip = CombatManager.calculate_equipment_bonus(self.config_manager, defender)
+        atk_equip = CombatManager.calculate_equipment_bonus(
+            self.config_manager, attacker, await self.db.get_refine_map(attacker.user_id)
+        )
+        def_equip = CombatManager.calculate_equipment_bonus(
+            self.config_manager, defender, await self.db.get_refine_map(defender_id)
+        )
         atk_stats = CombatManager.calculate_combat_stats(
             attacker, atk_impart, atk_equip["atk"], atk_equip["defense"]
         )

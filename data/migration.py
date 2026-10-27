@@ -5,7 +5,7 @@ from typing import Dict, Callable, Awaitable
 from astrbot.api import logger
 from ..config_manager import ConfigManager
 
-LATEST_DB_VERSION = 25  # v25: 天灾人祸记录（calamity_records 表）
+LATEST_DB_VERSION = 26  # v26: 炼器精炼记录（equipment_refine 表）
 
 # 灵眼时效（小时）：与 managers/spirit_eye_manager.py::SPIRIT_EYE_TYPES 保持一致。
 # 迁移函数内不能 import managers.*（会引发循环依赖），故在此复制一份并由测试断言一致性。
@@ -682,6 +682,16 @@ async def _create_all_tables_v2(conn: aiosqlite.Connection):
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_calamity_records_user ON calamity_records(target_user_id)"
     )
+
+    # 炼器精炼记录表（v26）：记录每件装备的精炼星数（user_id + item_name 唯一）
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS equipment_refine (
+            user_id TEXT NOT NULL,
+            item_name TEXT NOT NULL,
+            refine_level INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, item_name)
+        )
+    """)
 
     # ===== 种子数据 =====
     # 默认秘境（v15 的种子数据；缺失会导致 /秘境列表 永远为空）
@@ -1523,3 +1533,32 @@ async def _migrate_to_v25(conn: aiosqlite.Connection, config_manager: ConfigMana
 
     await conn.commit()
     logger.info("v25迁移完成：天灾人祸记录已启用")
+
+
+@migration(26)
+async def _migrate_to_v26(conn: aiosqlite.Connection, config_manager: ConfigManager):
+    """迁移到v26 - 炼器精炼记录
+
+    背景：
+        新增的「炼器 / 精炼升星」系统需要持久化每件装备的精炼星数。
+        精炼升星让玩家消耗材料（精铁 / 紫金沙等）与灵石提升已有装备的攻防，
+        是孤儿材料（精铁、星辰石、紫金沙等）的核心消耗出口，也兑现了
+        README 中「材料用于装备升级」的承诺。
+
+    变更：
+        新增 `equipment_refine` 表，按 (user_id, item_name) 记录精炼星数；
+        全新安装路径 `_create_all_tables_v2()` 已同步建表。
+    """
+    logger.info("开始迁移到v26：炼器精炼记录")
+
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS equipment_refine (
+            user_id TEXT NOT NULL,
+            item_name TEXT NOT NULL,
+            refine_level INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, item_name)
+        )
+    """)
+
+    await conn.commit()
+    logger.info("v26迁移完成：炼器精炼记录已启用")

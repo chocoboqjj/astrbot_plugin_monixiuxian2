@@ -152,3 +152,20 @@ CALAMITY_CONFIG = {
         },
     ],
 }
+
+FORGE_CONFIG = {
+    "refine": {
+        "max_level": 10,
+        "per_star_bonus": 0.10,
+        "base_success_rate": 85,
+        "star_penalty": 5,
+        "min_success_rate": 20,
+        "gold_base": 500,
+        "gold_step": 500,
+        "material_base": {"精铁": 1},
+        "material_step": {"精铁": 1},
+        "premium_material": "紫金沙",
+        "premium_from_star": 6,
+        "premium_step": 1,
+    }
+}

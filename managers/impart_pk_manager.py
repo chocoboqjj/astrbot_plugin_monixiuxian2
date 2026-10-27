@@ -17,9 +17,10 @@ class ImpartPkManager:
         self.combat_mgr = combat_mgr
         self.config_manager = config_manager
     
-    def _equipment_bonus(self, player) -> dict:
-        """复用 CombatManager 的装备加成计算，保持与决斗一致。"""
-        return CombatManager.calculate_equipment_bonus(self.config_manager, player)
+    async def _equipment_bonus(self, player) -> dict:
+        """复用 CombatManager 的装备加成计算（含精炼），保持与决斗一致。"""
+        refine_map = await self.db.get_refine_map(player.user_id)
+        return CombatManager.calculate_equipment_bonus(self.config_manager, player, refine_map)
 
     async def challenge_impart(self, attacker: Player, defender: Player) -> Tuple[bool, str, dict]:
         """发起传承挑战
@@ -36,8 +37,8 @@ class ImpartPkManager:
         defender_impart = await self.db.ext.get_impart_info(defender.user_id)
         
         # 准备战斗属性（含传承加成与装备加成，与决斗战斗一致）
-        atk_equip = self._equipment_bonus(attacker)
-        def_equip = self._equipment_bonus(defender)
+        atk_equip = await self._equipment_bonus(attacker)
+        def_equip = await self._equipment_bonus(defender)
         atk_stats = self.combat_mgr.calculate_combat_stats(
             attacker, attacker_impart, atk_equip["atk"], atk_equip["defense"]
         )

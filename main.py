@@ -14,14 +14,14 @@ from .handlers import (
     RiftHandlers, AdventureHandlers, AlchemyHandlers, ImpartHandlers,
     NicknameHandler, BankHandlers, BountyHandlers, ImpartPkHandlers,
     BlessedLandHandlers, SpiritFarmHandlers, DualCultivationHandlers, SpiritEyeHandlers,
-    CalamityHandlers
+    CalamityHandlers, ForgeHandlers
 )
 from .managers import (
     CombatManager, SectManager, BossManager, RiftManager, 
     RankingManager, AdventureManager, AlchemyManager, ImpartManager,
     BankManager, BountyManager, ImpartPkManager,
     BlessedLandManager, SpiritFarmManager, DualCultivationManager, SpiritEyeManager,
-    CalamityManager
+    CalamityManager, ForgeManager
 )
 
 
@@ -117,6 +117,11 @@ CMD_ADVENTURE_INFO = "历练信息"
 # 炼丹系统指令
 CMD_ALCHEMY_RECIPES = "丹药配方"
 CMD_ALCHEMY_CRAFT = "炼丹"
+
+# 炼器系统指令（v3.3.3：装备打造 + 精炼升星）
+CMD_FORGE_RECIPES = "炼器配方"
+CMD_FORGE = "炼器"
+CMD_REFINE = "精炼"
 
 # 传承系统指令
 CMD_IMPART_INFO = "传承信息"
@@ -218,6 +223,7 @@ class XiuXianPlugin(Star):
         self.rank_mgr = RankingManager(self.db, self.combat_mgr, self.config_manager)
         self.adventure_mgr = AdventureManager(self.db, self.storage_ring_mgr)
         self.alchemy_mgr = AlchemyManager(self.db, self.config_manager, self.storage_ring_mgr)
+        self.forge_mgr = ForgeManager(self.db, self.config_manager, self.storage_ring_mgr)
         self.impart_mgr = ImpartManager(self.db)
 
         # 初始化新功能处理器
@@ -228,6 +234,7 @@ class XiuXianPlugin(Star):
         self.rift_handlers = RiftHandlers(self.db, self.rift_mgr)
         self.adventure_handlers = AdventureHandlers(self.db, self.adventure_mgr)
         self.alchemy_handlers = AlchemyHandlers(self.db, self.alchemy_mgr)
+        self.forge_handlers = ForgeHandlers(self.db, self.forge_mgr)
         self.impart_handlers = ImpartHandlers(self.db, self.impart_mgr)
         self.nickname_handler = NicknameHandler(self.db)  # Phase 1
         
@@ -1229,6 +1236,25 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_alchemy_craft(self, event: AstrMessageEvent, pill_id: int = 0):
         async for r in self.alchemy_handlers.handle_craft(event, pill_id):
+            yield r
+
+    # ===== 炼器指令（v3.3.3：装备打造 + 精炼升星） =====
+    @filter.command(CMD_FORGE_RECIPES, "查看炼器配方")
+    @require_whitelist
+    async def handle_forge_recipes(self, event: AstrMessageEvent):
+        async for r in self.forge_handlers.handle_recipes(event):
+            yield r
+
+    @filter.command(CMD_FORGE, "打造装备")
+    @require_whitelist
+    async def handle_forge(self, event: AstrMessageEvent, recipe_id: int = 0):
+        async for r in self.forge_handlers.handle_forge(event, recipe_id):
+            yield r
+
+    @filter.command(CMD_REFINE, "精炼升星装备")
+    @require_whitelist
+    async def handle_refine(self, event: AstrMessageEvent, item_name: str = ""):
+        async for r in self.forge_handlers.handle_refine(event, item_name):
             yield r
 
     # ===== 传承指令 =====

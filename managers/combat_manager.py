@@ -93,25 +93,37 @@ class CombatManager:
         )
 
     @staticmethod
-    def calculate_equipment_bonus(config_manager, player) -> Dict[str, int]:
+    def calculate_equipment_bonus(config_manager, player, refine_map: Optional[Dict[str, int]] = None) -> Dict[str, int]:
         """计算装备提供的攻防加成（武器加攻击，防具加防御）。
 
         同时供决斗与传承挑战复用，避免逻辑分散。
+        refine_map: {item_name: 精炼星数}，提供则按星数放大装备攻防。
         """
         bonus: Dict[str, int] = {"atk": 0, "defense": 0}
         if not config_manager:
             return bonus
 
+        # 精炼加成倍率（每星提升装备攻防）
+        per_star = 0.10
+        forge_cfg = getattr(config_manager, "forge_config", None)
+        if forge_cfg:
+            per_star = forge_cfg.get("refine", {}).get("per_star_bonus", 0.10)
+
+        def _mult(item_name: str) -> float:
+            if not refine_map:
+                return 1.0
+            star = refine_map.get(item_name, 0)
+            return 1.0 + star * per_star
+
         if player.weapon and player.weapon in config_manager.weapons_data:
             data = config_manager.weapons_data[player.weapon]
-            bonus["atk"] += data.get("atk", 0)
-            bonus["atk"] += data.get("physical_damage", 0)
-            bonus["atk"] += data.get("magic_damage", 0)
+            atk = data.get("atk", 0) + data.get("physical_damage", 0) + data.get("magic_damage", 0)
+            bonus["atk"] += int(round(atk * _mult(player.weapon)))
 
         if player.armor and player.armor in config_manager.items_data:
             data = config_manager.items_data[player.armor]
-            bonus["defense"] += data.get("physical_defense", 0)
-            bonus["defense"] += data.get("magic_defense", 0)
+            defense = data.get("physical_defense", 0) + data.get("magic_defense", 0)
+            bonus["defense"] += int(round(defense * _mult(player.armor)))
 
         return bonus
 

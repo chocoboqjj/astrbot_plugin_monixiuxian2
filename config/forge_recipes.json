@@ -1,0 +1,58 @@
+[
+    {
+        "id": 1,
+        "name": "青铜剑",
+        "level_required": 0,
+        "materials": {"精铁": 3, "灵石": 200},
+        "success_rate": 90
+    },
+    {
+        "id": 2,
+        "name": "精钢剑",
+        "level_required": 0,
+        "materials": {"精铁": 6, "灵石": 400},
+        "success_rate": 85
+    },
+    {
+        "id": 3,
+        "name": "碧水灵剑",
+        "level_required": 10,
+        "materials": {"精铁": 8, "星辰石": 3, "灵兽毛皮": 2, "灵石": 2000},
+        "success_rate": 75
+    },
+    {
+        "id": 4,
+        "name": "赤焰灵剑",
+        "level_required": 10,
+        "materials": {"精铁": 8, "星辰石": 3, "灵兽毛皮": 2, "灵石": 2000},
+        "success_rate": 75
+    },
+    {
+        "id": 5,
+        "name": "寒冰地剑",
+        "level_required": 12,
+        "materials": {"星辰石": 5, "灵兽内丹": 2, "天材地宝": 1, "灵石": 5000},
+        "success_rate": 65
+    },
+    {
+        "id": 6,
+        "name": "青云天剑",
+        "level_required": 13,
+        "materials": {"星辰石": 8, "灵兽内丹": 3, "天材地宝": 2, "灵石": 10000},
+        "success_rate": 55
+    },
+    {
+        "id": 7,
+        "name": "紫霄皇剑",
+        "level_required": 16,
+        "materials": {"星辰石": 12, "灵兽内丹": 5, "天材地宝": 4, "灵石": 25000},
+        "success_rate": 45
+    },
+    {
+        "id": 8,
+        "name": "九霄帝剑",
+        "level_required": 22,
+        "materials": {"紫金沙": 5, "天材地宝": 8, "灵兽内丹": 8, "灵石": 60000},
+        "success_rate": 35
+    }
+]

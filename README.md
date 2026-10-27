@@ -4,7 +4,7 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.3.2  
+> **版本:** v3.3.3  
 > **许可证:** AGPL-3.0  
 > **作者:** xiaojuwa  
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -186,6 +186,16 @@
 | `丹药配方` | 查看炼丹配方及成功率 |
 | `炼丹 <配方ID>` | 炼制丹药（成功后存入丹药背包） |
 
+### ⚒️ 炼器系统（装备打造 + 精炼升星）
+| 指令 | 说明 |
+|------|------|
+| `炼器配方` | 查看可打造的装备及所需材料、成功率 |
+| `炼器 <配方ID>` | 打造装备（消耗灵石+材料，成功后存入储物戒） |
+| `精炼 <装备名>` | 消耗精铁 / 紫金沙 + 灵石提升装备星数（每星 +10% 攻防） |
+
+> 精炼升星的攻防加成**真实作用于**决斗、Boss、灵眼争夺、传承挑战等所有战斗。
+> 打造与精炼是孤儿材料（精铁、星辰石、灵兽内丹、天材地宝、**紫金沙** 等）的核心消耗出口。
+
 ### ✨ 传承系统
 | 指令 | 说明 |
 |------|------|
@@ -301,6 +311,8 @@
 | `boss_config.json` | Boss 属性成长曲线、生成间隔、挑战次数上限、挑战冷却 |
 | `rift_config.json` | 秘境名称、等级要求、探索时长、奖励池 |
 | `alchemy_config.json` | 丹药配方、材料消耗、成功率计算 |
+| `forge_recipes.json` | 炼器配方（装备产出 + 所需材料 + 成功率） |
+| `forge_config.json` | 精炼升星参数（每星加成、成功率衰减、消耗曲线） |
 | `calamity_config.json` | 天灾种类表（10 种天灾的权重与扣减比例）、触发间隔、无事发生概率 |
 
 **AstrBot 配置面板**（`_conf_schema.json`）：除上表 JSON 外，另有四组可直接在面板调整的键位——
@@ -393,6 +405,25 @@ astrbot_plugin_monixiuxian2/
 - `managers/spirit_farm_manager.py` 新增 `plant_all(player, herb_name, count=None)`：把全部空种植格一次性种满指定灵草；省略 `count` 则填满所有空格，指定数量则只种 N 株。
 - `handlers/spirit_farm_handlers.py` 新增 `handle_plant_all`，兼容「灵草名 数量」同参写法。
 - `main.py` 新增指令 **`一键种植 <灵草名> [数量]`**（已登记修仙帮助与指令表）。
+
+---
+
+### v3.3.3 - 炼器系统（装备打造 + 精炼升星）+ 紫金沙死内容修复
+
+**✨ 新功能：炼器系统（装备打造 + 精炼升星）**
+
+- **背景**：README 早已承诺材料是「装备升级所需的基础资源」，但代码里**从未实现炼器/精炼机制**，导致精铁、星辰石、灵兽内丹、天材地宝等掉落材料全部积压无消耗；紫金沙更是在全仓库仅出现于 `items.json` 一处——既无掉落源、也无消耗口、连存入储物戒的资格都没有，是彻底死内容。本次一并补齐。
+- **装备打造**（`config/forge_recipes.json`，8 档配方，从凡品青铜剑到帝品九霄帝剑）：
+  - 照搬炼丹流程（查配方 → 查境界 → 查材料 → 扣材料 → 成功率判定 → 产出入包/吞材料），产出改为**存入储物戒**供装备。
+  - 顶层配方（九霄帝剑）消耗 **紫金沙 ×5**，让稀有矿成为高阶打造的硬通货。
+- **精炼升星**（`config/forge_config.json`）：
+  - 消耗灵石 + 精铁（第 6 星起额外消耗**紫金沙**）提升已有装备的精炼星数，每星按 `per_star_bonus`（默认 10%）放大装备攻防。
+  - 精炼加成**真实接入** `combat_manager.calculate_equipment_bonus`，并通过 `DataBase.get_refine_map` 串联到**决斗、Boss、灵眼争夺、传承挑战**全部 5 个战斗场景；失败不降星、只吞材料。
+  - 持久化：`equipment_refine` 表（`user_id` + `item_name` 唯一）+ v26 数据库迁移，全新安装路径 `_create_all_tables_v2()` 同步建表。
+- **紫金沙死内容修复**：
+  - `handlers/storage_ring_handler.py` 的「可存入材料」清单新增紫金沙（否则掉落也存不进储物戒）；
+  - `config/adventure_config.json` 的 `drop_tables.high` 档新增紫金沙（weight 4，作为稀有高阶掉落来源）。
+- **文件改动**：新增 `config/forge_recipes.json` / `config/forge_config.json` / `managers/forge_manager.py` / `handlers/forge_handlers.py`；改动 `config_manager.py`（加载炼器配置）、`data/default_configs.py`（FORGE_CONFIG 默认）、`data/migration.py`（v26 + 建表）、`data/data_manager.py`（精炼存取）、`managers/combat_manager.py`（精炼倍率）、5 个战斗调用点、`main.py`（指令接线）、`handlers/storage_ring_handler.py`、`config/adventure_config.json`、修仙帮助、README、metadata。
 
 ---
 
