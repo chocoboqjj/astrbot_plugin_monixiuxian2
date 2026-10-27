@@ -19,7 +19,7 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **⚠️ 模块级常量勿用 `self.` 访问**（曾致 AttributeError）。**⚠️ 储物戒 lost update**：`storage_ring_manager` 内部重读玩家局部重绑，调用方 `update_player()` 会覆盖回旧值，已用 `_sync_ring_items_to_caller()` 解决。**⚠️ `can_store_item` 不校验存在性** ⇒ 掉落名写错即幽灵物品。
 - **⚠️ 文案禁回显内部英文键**：须有 `*_NAMES` 中文映射，`.get(key,key)` 改中文兜底（回归 `test_i18n_no_english.py`）。**⚠️ `ConfigManager` 无 `adventure_config`**：读 `AdventureManager.CONFIG_FILE`。
 - **⚠️ 永久属性丹「每境界 30%」配额按境界+属性分桶**（所有 `*_gain` 共用）；境界 0 基准 0 ⇒ 永久丹对境界 0 恒无效、宗门丹药门槛不能设 0。`breakthrough_boost` 防无限叠加：`temp_bonus_cap`(0.05) 双桶夹紧。
-- **⚠️ SQLite `UPDATE...FROM` 的 `RETURNING` 不能引用 FROM 表旧列**（实测 `no such column: old.x`）。
+- **⚠️ SQLite `UPDATE...FROM` 的 `RETURNING` 不能引用 FROM 表旧列**；同上一条：⭐ 取旧值唯一技巧 = `WITH old AS MATERIALIZED` 且 CTE 引用在 `SET` 表达式里（`RETURNING` 只看新值），护盾判定须同语句。
 
 ## 债务继承制（v3.2.7）
 - **身死不清债**：贷款未还清身死 → 转 `carried`，重开后恢复（本金=死亡锁定本金+利息、利率归零、due=now+7天），仅「逾期被银行追杀」免除。入口 `core/penalty_manager.py::apply_death_debt()`。
@@ -44,7 +44,6 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 
 ## 天灾人祸系统约定（v3.2.9）
 - **⚠️ 扣减必须「原地加减」**（`gold = MAX(0, gold - ?)`），**不能**读旧值写回绝对值：所有 manager **共享同一 aiosqlite 连接**，事务边界**连接级** ⇒ 写回绝对值**丢更新**；也不能「条件 UPDATE+旧值守卫+rollback」（rollback 连坐其他协程）。
-- **⭐ 取旧值唯一技巧**：`RETURNING` 只看新值；须 `WITH old AS MATERIALIZED(...)` 且 CTE **引用在 `SET` 表达式里**（只在 RETURNING 引用拿到新值）；护盾判定须同语句。
 - **判定顺序**虚惊一场→护盾免疫→实际扣减（虚惊不消耗护盾）。**境界地板**：`experience` 不清零，下限=`exp_needed[level_index]`。**绝不致死**：只扣 gold/experience。定魂丹 `has_debuff_shield` 首个消费点。新增表 `calamity_records`(v25)+`calamity_config.json`+`CALAMITY`。
 
 ## 遗留缺陷修复包（v3.3.0/3.3.1，细节见 2026-10-23 日志）
@@ -68,7 +67,7 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 ## 图片模式（v3.3.5/v3.3.6）
 - `main.py` `on_decorating_result` 钩子 + `long_plain_text`：单条纯文本 ≥ `IMAGE_MODE_MIN_LENGTH`(300) 自动转图，富媒体/短文本不转。钩子内**禁 yield**，改 `event.get_result().chain`。
 - **⚠️ 组件判定用 type 名 `"Plain"`** ⇒ 测试 stub 类名必须叫 `Plain`/`Image`。官方 API 是 `self.text_to_image`/`self.html_render`/`event.image_result`，**无** `event.text_to_picture`。
-- **v3.3.6 美化**：`utils/panel_renderer.py::render_panel_html` 按行宽容解析（标题/【段落】/kv/`→`指令/`└─`/分隔线/普通行，**绝不丢行**）→ 宣纸金模板 → 优先 `html_render(html,{},return_url=False)`，失败回退 `text_to_image`，再回退纯文本。**⚠️ html_render 用 Jinja2 渲染模板串** ⇒ CSS 全 class 选择器（勿用 id 防 `{#`）、模板禁 `{{`/`{%`；文本须 HTML 转义；无冒号的 `+数值` 行靠 `_emphasize` 高亮。
+- **v3.3.6 美化**：`utils/panel_renderer.py::render_panel_html` 按行宽容解析（**绝不丢行**）→ 宣纸金模板 → 优先 `html_render(html,{},return_url=False)`，失败回退 `text_to_image`，再回退纯文本。**⚠️ html_render 用 Jinja2 渲染模板串** ⇒ CSS 全 class（勿用 id 防 `{#`）、模板禁 `{{`/`{%`；文本须转义；无冒号 `+数值` 行靠 `_emphasize`。
 
 ## 工程约定
 
