@@ -370,7 +370,7 @@
 | `VALUES` 面板主题（v3.3.7 新增） | `PANEL_THEME` | 转图面板的视觉主题；`paper` = 宣纸金（默认，第一版设计）、`gold` = 玄金暗色。未知值回退默认主题 |
 | `VALUES` 转图整页截图（v3.3.9 新增） | `IMAGE_MODE_FULL_PAGE` | 默认 `true`：整页截图并按面板实际高度裁剪（短内容无大片空白、超长面板不截断）。若你的渲染器对整页截图支持异常（仍出现整页空白），可改为 `false` 改用固定视口截图（超长面板可能被截断） |
 | `VALUES` 转图超时（v3.3.10 新增） | `IMAGE_MODE_RENDER_TIMEOUT` | 默认 `8`（秒）：单次渲染最长等待，超时即放弃转图回退纯文本。日志若刷 `t2i.rcfortress.site ... Cannot connect ... trying next`，说明宿主在连内置**远程**渲染后端且连不上；调小本值（如 `3`）或配合下方开关可显著提速。设 `0` = 不限制 |
-| `VALUES` 跳过远程回退（v3.3.10 新增） | `IMAGE_MODE_SKIP_REMOTE_FALLBACK` | 默认 `false`。`true` = 完全不调用 `text_to_image` 回退（该回退在未配本地渲染器时会连远程 t2i 服务，慢/不可达）。开启后：本地 `html_render` 可用则出图，否则直接发纯文本，绝不再连远程——想要「瞬时、不连外网」就设为 `true`。推荐同时在宿主侧配置本地 html-render（Playwright）渲染器 |
+| `VALUES` 跳过远程回退（v3.3.10 新增，**v3.3.11 起默认 `true`**） | `IMAGE_MODE_SKIP_REMOTE_FALLBACK` | 默认 `true`：只走本地 Playwright（`html_render`），**完全不调用** `text_to_image` 远程回退；本地渲染不可用则直接发纯文本，绝不再连远程 t2i 服务。若自建了本地 t2i 服务并想保留该回退，可设为 `false` |
 
 **注意**：修改配置后需重启 AstrBot 生效。
 
@@ -378,12 +378,24 @@
 
 ## 🖼️ 开启图片卡片 (可选)
 
-本插件支持生成精美个人信息卡片：
+本插件的长面板（`/我的信息`、修仙帮助、排行榜等）会自动渲染为**仙侠风格图片卡片**。
 
-1. **安装依赖**: `pip install Pillow`
-2. **获取素材**: 下载[卡图资源包](https://cowtransfer.com/s/82b90d2b879d43) (口令：k3jzr5)
-3. **放置素材**: 解压后将 `xiuxian` 文件夹放入 AstrBot 的 `data/` 目录中
-4. **生效验证**: 发送 `/我的信息`，若配置正确将发送图片
+**渲染方式：本地 Playwright（v3.3.11 起为唯一路径）**
+
+卡片由插件生成 HTML，再交给宿主 AstrBot 的本地渲染器 `html_render`（Playwright + Chromium）
+截图成图——**全程不连外网，也不需要任何卡图素材包**。插件已移除旧的 Pillow 绘图实现
+（`utils/image_generator.py`）与 Pillow 依赖。
+
+1. **启用本地渲染器**（务必在 **AstrBot 所用的 Python 环境**中执行）：
+   ```bash
+   pip install playwright
+   python -m playwright install chromium
+   ```
+   > 国内加速：`pip install playwright -i https://pypi.tuna.tsinghua.edu.cn/simple`；
+   > 内核下载慢可加 `PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright/`。
+2. **开启图片模式**：插件配置 `VALUES.IMAGE_MODE`（默认已开）。
+3. **生效验证**：发送 `/我的信息`，秒回一张仙侠卡片即成功。
+   - 若只回纯文本，说明宿主尚未启用本地渲染器（插件默认已关闭远程回退，不会去连外网）。
 
 ### 转图很慢 / 日志刷 `t2i.rcfortress.site ... trying next` 怎么办？
 
@@ -391,13 +403,12 @@
 `text_to_image`，而 `rcfortress.site` 是 AstrBot 内置的**默认远程**渲染后端。当宿主没配本地
 渲染器时，`text_to_image` 会去连这个公共服务，连不上就逐个端点重试（`trying next`），于是很慢。
 
-三种解决（按推荐度）：
+**v3.3.11 起本插件默认已不再触发该远程回退**（`IMAGE_MODE_SKIP_REMOTE_FALLBACK` 默认为 `true`）。
+若仍看到该日志，按推荐度处理：
 
 1. **配本地渲染器（最快最稳）**：在 AstrBot 配置里启用本地 `html-render`（Playwright）渲染器，
    主路径本地出图、不碰任何外网，又快又稳。配好后本插件的仙侠面板模板即可正常出图。
-2. **跳过远程回退**：把 `VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK` 设为 `true`。开启后若本地
-   `html_render` 不可用就直接发纯文本，绝不再连远程——瞬时、不连外网。适合暂时不想折腾渲染器的环境。
-3. **缩短超时兜底**：把 `VALUES.IMAGE_MODE_RENDER_TIMEOUT` 调小（如 `3`）。即使仍走远程，
+2. **缩短超时兜底**：把 `VALUES.IMAGE_MODE_RENDER_TIMEOUT` 调小（如 `3`）。即使仍走远程，
    最多等 3 秒就放弃并回退纯文本，不再被拖死。
 
 ---
@@ -406,7 +417,7 @@
 
 1. 确保已安装 AstrBot
 2. 将插件文件夹放入 `data/plugins/` 目录
-3. 安装依赖：`pip install -r requirements.txt`
+3. 依赖：本插件**无强制 Python 依赖**（转图所需的 Playwright 由宿主 AstrBot 提供，见上文「开启图片卡片」）；仍可执行 `pip install -r requirements.txt`（当前为空操作）
 4. 在 AstrBot 控制台启用插件
 5. 发送 `我要修仙` 开始体验！
 
@@ -458,6 +469,19 @@ astrbot_plugin_monixiuxian2/
 ---
 
 ## 📝 更新日志
+
+### v3.3.11 - 转图统一走本地 Playwright，移除 Pillow
+
+**♻️ 重构：图片渲染只保留「本地 Playwright」一条路径**
+
+- **移除 Pillow**：删除内置的 Pillow 绘图实现 `utils/image_generator.py`（自 v3.3.6 改用 HTML 面板后已无任何调用），
+  并从 `requirements.txt` 移除 `Pillow` 依赖——本插件现在**零额外 Python 依赖**。Pillow 无法渲染 HTML/CSS，
+  留着它只会误导用户以为需要安装，而实际渲染是由宿主完成的。
+- **远程回退默认关闭**：`VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK` 默认值 `false` → `true`。
+  现在只走宿主的本地 `html_render`（Playwright）出图；本地渲染不可用时直接发纯文本，
+  **默认不再连接 AstrBot 内置的远程 t2i 服务（`t2i.rcfortress.site`）**。若你自建了本地 t2i 服务，可设回 `false`。
+- **文档修正**：删除过时的「安装 Pillow / 下载卡图素材包」步骤（那是 v3.3.6 之前的老卡片方案），
+  改为「在 **AstrBot 所用的 Python 环境**中安装 Playwright + Chromium」的正确指引。
 
 ### v3.3.10 - 图片模式：渲染超时兜底 + 跳过远程回退
 

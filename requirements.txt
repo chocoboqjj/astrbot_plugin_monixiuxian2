@@ -1,1 +1,7 @@
-Pillow>=9.0.0
+# 本插件无额外 Python 依赖。
+#
+# 面板转图（仙侠卡片）依赖宿主 AstrBot 的本地渲染能力：Playwright + Chromium，
+# 由 AstrBot 自身提供（插件调用 event.html_render），无需在此安装 Pillow。
+# 若宿主尚未启用本地渲染，请在 AstrBot 所用的 Python 环境中执行：
+#   pip install playwright
+#   python -m playwright install chromium

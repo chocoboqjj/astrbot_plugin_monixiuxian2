@@ -1604,11 +1604,16 @@ class XiuXianPlugin(Star):
           为此新增：
             - VALUES.IMAGE_MODE_RENDER_TIMEOUT（秒，默认 8）：单次渲染的最长等待，超时即放弃
               转图并回退纯文本，避免远程挂死拖慢整条回复。设 0 表示不限制。
-            - VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK（默认 false）：为 true 时**完全不调用**
-              远程 text_to_image 回退——若本地 html_render 不可用就直接发纯文本，绝不再去连
-              远程服务（想要「瞬时、不连外网」就把它设为 true）。
+            - VALUES.IMAGE_MODE_SKIP_REMOTE_FALLBACK（**v3.3.11 起默认 true**）：为 true 时
+              **完全不调用**远程 text_to_image 回退——只走本地 Playwright（html_render），
+              本地渲染不可用就直接发纯文本，绝不再去连远程服务。若自建了本地 t2i 服务并想
+              保留该回退，可设为 false。
           推荐做法：在宿主侧配置一个**本地** html-render（Playwright）渲染器，主路径本地出图、
           又快又稳，根本不会碰到远程端点。
+        - v3.3.11：**只走本地 Playwright**。删除内置的 Pillow 绘图实现
+          （utils/image_generator.py，自 v3.3.6 改用 HTML 面板后已无人使用）与 Pillow 依赖；
+          远程回退默认关闭。渲染完全依赖宿主的本地 html_render（Playwright），
+          宿主未启用本地渲染时回退纯文本。
         """
         try:
             # v3.3.9：仅本插件来源。on_decorating_result 全局触发，必须先排除其它来源，
@@ -1637,7 +1642,8 @@ class XiuXianPlugin(Star):
                 timeout = int(values.get("IMAGE_MODE_RENDER_TIMEOUT", 8) or 0)
             except (TypeError, ValueError):
                 timeout = 8
-            skip_remote = bool(values.get("IMAGE_MODE_SKIP_REMOTE_FALLBACK", False))
+            # v3.3.11：默认 true —— 只走本地 Playwright（html_render），不连远程 t2i 服务
+            skip_remote = bool(values.get("IMAGE_MODE_SKIP_REMOTE_FALLBACK", True))
 
             async def _try_render(coro):
                 # 给渲染调用套一个硬超时：本地渲染器正常时远不到上限；远程服务挂死时
