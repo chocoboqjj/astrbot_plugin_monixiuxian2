@@ -155,6 +155,7 @@ CMD_BLESSED_LAND_COLLECT = "洞天收取"
 CMD_SPIRIT_FARM_INFO = "我的灵田"
 CMD_SPIRIT_FARM_CREATE = "开垦灵田"
 CMD_SPIRIT_FARM_PLANT = "种植"
+CMD_SPIRIT_FARM_PLANT_ALL = "一键种植"
 CMD_SPIRIT_FARM_HARVEST = "收获"
 CMD_SPIRIT_FARM_UPGRADE = "升级灵田"
 
@@ -1379,6 +1380,12 @@ class XiuXianPlugin(Star):
     @require_whitelist
     async def handle_spirit_farm_plant(self, event: AstrMessageEvent, herb_name: str = ""):
         async for r in self.spirit_farm_handlers.handle_plant(event, herb_name):
+            yield r
+
+    @filter.command(CMD_SPIRIT_FARM_PLANT_ALL, "一键种植灵草")
+    @require_whitelist
+    async def handle_spirit_farm_plant_all(self, event: AstrMessageEvent, herb_name: str = "", count: int = None):
+        async for r in self.spirit_farm_handlers.handle_plant_all(event, herb_name, count):
             yield r
 
     @filter.command(CMD_SPIRIT_FARM_HARVEST, "收获灵草")

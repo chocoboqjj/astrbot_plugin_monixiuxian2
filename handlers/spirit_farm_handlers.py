@@ -49,6 +49,36 @@ class SpiritFarmHandlers:
         yield event.plain_result(msg)
     
     @player_required
+    async def handle_plant_all(self, player: Player, event: AstrMessageEvent, herb_name: str = "", count: int = None):
+        """一键种植指定灵草（填满空种植格，可指定数量）"""
+        # 兼容不同指令解析：把「灵草名 数量」从同一参数字符串里拆出
+        parts = (herb_name or "").strip().split()
+        if not parts:
+            yield event.plain_result(
+                "🌱 一键种植\n"
+                "━━━━━━━━━━━━━━━\n"
+                "灵草 - 1小时 (修为+500)\n"
+                "血灵草 - 2小时 (修为+1500)\n"
+                "冰心草 - 4小时 (修为+4000)\n"
+                "火焰花 - 8小时 (修为+10000)\n"
+                "九叶灵芝 - 24小时 (修为+30000)\n"
+                "━━━━━━━━━━━━━━━\n"
+                "💡 使用 /一键种植 <灵草名> [数量]"
+            )
+            return
+        
+        name = parts[0]
+        cnt = None
+        if len(parts) > 1:
+            try:
+                cnt = int(parts[1])
+            except ValueError:
+                cnt = None
+        
+        success, msg = await self.mgr.plant_all(player, name, cnt)
+        yield event.plain_result(msg)
+    
+    @player_required
     async def handle_harvest(self, player: Player, event: AstrMessageEvent):
         """收获灵草"""
         success, msg = await self.mgr.harvest(player)

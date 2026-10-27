@@ -1,6 +1,6 @@
 # 项目长期记忆
 
-AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前 v3.3.1。
+AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前 v3.3.2。
 > 详细改动见 `.workbuddy/memory/2026-10-*.md` 日志；本文件只留"不可再生的踩坑事实"。
 
 ## ⚠️ QQ 官方 @解析（v3.2.4 踩坑）
@@ -52,13 +52,17 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **⭐ 取旧值的唯一可靠技巧**：`RETURNING` 只看得到**更新后**的值；须用 `WITH old AS MATERIALIZED(...)` 并把 CTE **引用在 `SET` 表达式里**（强制写入前求值）。⚠️ CTE 只在 `RETURNING` 里引用会拿到新值。护盾判定须同语句。
 - **判定顺序**虚惊一场→护盾免疫→实际扣减（虚惊时**不消耗**定魂护盾）。**境界地板**：`experience` 累计不清零，下限 = `exp_needed[level_index]`。**绝不致死**：只扣 `gold`/`experience`，不删号、不走 `punish()`。`has_debuff_shield`（定魂丹）此前是「只设不消」的悬空特性，本系统是其**首个消费点**。新增表 `calamity_records`（v25）+ `calamity_config.json` + `CALAMITY`。
 
-## 遗留缺陷修复包约定（v3.3.0 / v3.3.1，完整细节见 2026-10-23 日志）
-- **⚠️ 丹药表以「名称」为键**（`_load_items_data`）⇒ **同名即静默覆盖**（曾致混元血容丹 15000 档不可达）。已修：便宜档改名「百炼血容丹」、贵档保留原名（**存量背包零变化**），重名现告警。**跨表也要查重**（新丹药系统与旧 `items.json` 共享命名空间，已修「血煞丹」）。
-- **⚠️ `shop_weight=0` 排雷不能只靠权重语义**：`_weighted_random_choice` 在 `len(items) <= count` 时**直接返回全部候选、不看权重** ⇒ 阁楼数量配大时宗门丹全泄漏。已修：`generate_pavilion_items` 入口按 `shop_weight > 0` **硬过滤**；配套 `items.json` 材料原靠「缺省 100」进阁，**须显式赋权**。
-- **⚠️ `permanent_pill_gains` 顶层可能有非 dict 标量键**（洗髓丹/易筋丹的 `BASE_LIMIT_KEY`）⇒ **遍历 `permanent_gains.values()` 处必须 `isinstance(x, dict)` 判空**；改结构必查遍历点。
-- **`base_attribute_limit_increase`**：以**倍率**提升「每境界永久增益上限比例」（默认 30%），可叠加、有 `MAX_BASE_LIMIT_BONUS` 封顶。**这类丹不提供属性增益**，必须走独立分支，否则被 `if not gains_applied` 判成「已达上限」而**永不生效**。
-- **⚠️ 跨系上限兜底在代码层、不改境界表**：两表各缺对方能量字段，而**突破各系只读自己能量字段** ⇒ 补配置会改突破收益；故在 `_get_base_attributes_for_level` 用「本系主能量成长量」兜底，**境界表零改动**；成长量为 0（体修法伤）回退玩家当前值。
-- **⚠️ 改名必须覆盖全部掉落表**（v3.3.1）：v3.2.0 改「玄铁→精铁」时漏了 `rift.drop_tables` 与 `adventure_config.drop_tables` 中/高阶档 ⇒ 产出**幽灵物品**（掉落物进储物戒却无法使用/回收/出售）。**回归**：`/tmp/xx_test/test_drop_item_existence.py` 扫描全库掉落表校验存在性，**改材料名必跑**。
+## 遗留缺陷修复包（v3.3.0/3.3.1，细节见 2026-10-23 日志）
+- **丹药表以「名称」为键** ⇒ 同名静默覆盖；跨表（新丹药系统 vs `items.json`）共享命名空间须查重。
+- **`shop_weight=0` 排雷**：`_weighted_random_choice` 在 `len<=count` 时直接返全部候选；`generate_pavilion_items` 须按 `shop_weight>0` 硬过滤。
+- **`permanent_pill_gains` 顶层可能有标量键（BASE_LIMIT_KEY）** ⇒ 遍历 `.values()` 必须 `isinstance(x,dict)`。
+- **`base_attribute_limit_increase`** 是倍率提升永久增益上限，不提供属性，须走独立分支。
+- **跨系上限兜底在代码层、境界表零改动**（突破各系只读自己能量字段）。
+- **改名必须覆盖全部掉落表**（v3.3.1 玄铁→精铁漏两张掉落表 ⇒ 幽灵物品）；`test_drop_item_existence.py` 改材料名必跑。
+
+## 突破丹约定（v3.3.2）
+- **⚠️ `/突破 <破境丹名>` 必须先查背包并扣丹**：`pills.json` 里破境丹按 `target_level_index` 指向目标境界（筑基丹→10、结丹丹→13、凝婴丹→16…）。旧版 `handle_breakthrough` 只校验丹配置+适用境界，**从不查 `player.get_pills_inventory()`、从不扣丹** ⇒ 无丹也能白嫖加成（**全境界通用**，所谓「金丹期没事」是当时背包恰好有丹）。现修复：handler 先查背包拒绝无丹，manager 在突破条件满足后才扣 1 枚（修为不足不误扣）。**改突破逻辑时勿删这两道校验**，否则重现无消耗白嫖。
+- **灵田一键种植**（v3.3.2）：新增指令 `一键种植 <灵草名> [数量]`，`SpiritFarmManager.plant_all` 把空种植格一次性种满；省略数量填满全部空格。原逐格 `/种植 <名>` 保留。
 
 ## 工程约定
 - 按 AGENTS.md：功能更新/BUG 修复需同步 README.md、metadata.yaml 版本号、misc_handler.py 修仙帮助；新增玩家可见指令需登记 README 指令表与帮助。

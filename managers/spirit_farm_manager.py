@@ -122,6 +122,62 @@ class SpiritFarmManager:
             f"当前种植：{len(crops)}/{max_slots}"
         )
     
+    async def plant_all(self, player: Player, herb_name: str, count: int = None) -> Tuple[bool, str]:
+        """一键种植：将空种植格填满指定灵草
+
+        Args:
+            player: 玩家对象
+            herb_name: 灵草名称
+            count: 种植数量（省略则填满全部空格）
+
+        Returns:
+            (是否成功, 消息)
+        """
+        if herb_name not in SPIRIT_HERBS:
+            herbs_list = "、".join(SPIRIT_HERBS.keys())
+            return False, f"❌ 未知的灵草。可种植：{herbs_list}"
+        
+        farm = await self.get_user_farm(player.user_id)
+        if not farm:
+            return False, "❌ 你还没有灵田！使用 /开垦灵田"
+        
+        level_config = FARM_LEVELS.get(farm["level"], FARM_LEVELS[1])
+        max_slots = level_config["slots"]
+        crops = farm["crops"]
+        empty = max_slots - len(crops)
+        
+        if empty <= 0:
+            return False, f"❌ 灵田已满！最多种植 {max_slots} 株。"
+        
+        if count is None:
+            plant_count = empty
+        else:
+            plant_count = max(0, min(empty, int(count)))
+            if plant_count <= 0:
+                return False, f"❌ 灵田仅剩 {empty} 个空格，无法种植 {count} 株。"
+        
+        now = int(time.time())
+        herb_config = SPIRIT_HERBS[herb_name]
+        for _ in range(plant_count):
+            crops.append({
+                "name": herb_name,
+                "plant_time": now,
+                "mature_time": now + herb_config["grow_time"]
+            })
+        
+        await self.db.conn.execute(
+            "UPDATE spirit_farms SET crops = ? WHERE user_id = ?",
+            (json.dumps(crops), player.user_id)
+        )
+        await self.db.conn.commit()
+        
+        grow_hours = herb_config["grow_time"] // 3600
+        return True, (
+            f"🌱 一键种植【{herb_name}】×{plant_count} 成功！\n"
+            f"单株成熟：约 {grow_hours} 小时\n"
+            f"当前种植：{len(crops)}/{max_slots}"
+        )
+    
     async def harvest(self, player: Player) -> Tuple[bool, str]:
         """收获灵草"""
         farm = await self.get_user_farm(player.user_id)

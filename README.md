@@ -4,7 +4,7 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.3.1  
+> **版本:** v3.3.2  
 > **许可证:** AGPL-3.0  
 > **作者:** xiaojuwa  
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -219,7 +219,8 @@
 |------|------|
 | `我的灵田` | 查看灵田和种植情况 |
 | `开垦灵田` | 花费灵石开垦灵田 |
-| `种植 <灵草名>` | 种植灵草 |
+| `种植 <灵草名>` | 种植 1 株灵草 |
+| `一键种植 <灵草名> [数量]` | 一键填满空种植格（省略数量则填满全部空格） |
 | `收获` | 收获成熟的灵草获取修为 |
 | `升级灵田` | 增加种植格数 |
 
@@ -376,6 +377,24 @@ astrbot_plugin_monixiuxian2/
 ---
 
 ## 📝 更新日志
+
+### v3.3.2 - 突破丹背包校验修复 + 灵田一键种植
+
+**🐛 修复：突破丹无需拥有即可强行破境（且永不消耗）**
+
+- **根因**：`handle_breakthrough` 在玩家指定破境丹时，只校验「丹药配置存在 + 适用境界」，但**既不查背包是否真有这枚丹、也从不扣丹**；`execute_breakthrough` 直接把 `breakthrough_bonus` 加成算进去。
+  - 后果：玩家无需拥有破境丹，只要知道丹名就能 `/突破 <丹名>` 白嫖加成（所谓「金丹期没事、元婴期有」实为当时背包恰好有丹，检查缺失是**全境界通用**的）。同时破境丹被无限次复用，无消耗。
+- **修复**（两层防御）：
+  - `handlers/breakthrough_handler.py`：指定破境丹后，先查 `player.get_pills_inventory()`，没有则直接拒绝并提示「可在丹阁购买，或用 /突破 以基础成功率突破」。
+  - `core/breakthrough_manager.py::execute_breakthrough`：突破条件（非最高境界 + 修为足够）满足后，才校验并**扣除**该破境丹；条件不足（如修为不够）不会误扣。死亡分支下玩家被级联删除，丹自然作废。
+
+**✨ 优化：灵田一键种植**
+
+- `managers/spirit_farm_manager.py` 新增 `plant_all(player, herb_name, count=None)`：把全部空种植格一次性种满指定灵草；省略 `count` 则填满所有空格，指定数量则只种 N 株。
+- `handlers/spirit_farm_handlers.py` 新增 `handle_plant_all`，兼容「灵草名 数量」同参写法。
+- `main.py` 新增指令 **`一键种植 <灵草名> [数量]`**（已登记修仙帮助与指令表）。
+
+---
 
 ### v3.3.1 - 掉落表幽灵物品修复（玄铁 → 精铁 归一遗漏）
 

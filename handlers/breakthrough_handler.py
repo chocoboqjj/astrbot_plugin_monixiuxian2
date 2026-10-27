@@ -162,6 +162,17 @@ class BreakthroughHandler:
                 )
                 return
 
+            # ⚠️ 校验玩家背包是否真有这枚破境丹（修复「无丹也能强用破境丹」的 bug）
+            # 该检查此前完全缺失：/突破 <丹名> 只校验丹药配置与适用境界，
+            # 既不查背包、也不扣丹，导致没有丹药也能白嫖破境丹加成。
+            inventory = player.get_pills_inventory()
+            if inventory.get(pill_name, 0) <= 0:
+                yield event.plain_result(
+                    f"❌ 你背包里没有【{pill_name}】，无法用它辅助突破！\n"
+                    f"💡 可在丹阁购买，或直接使用 /突破 以基础成功率突破。"
+                )
+                return
+
             yield event.plain_result(f"使用【{pill_name}】进行突破...")
         else:
             pill_name = None

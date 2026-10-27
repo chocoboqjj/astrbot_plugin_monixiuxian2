@@ -126,6 +126,19 @@ class BreakthroughManager:
         if not can_breakthrough:
             return False, error_msg, False
 
+        # ⚠️ 破境丹校验 + 扣减：必须在「突破条件已满足」之后，
+        # 避免修为不足等情况下也白白消耗丹药。
+        # 此前此处完全不查背包、也不扣丹，导致没有丹药也能白嫖破境丹加成。
+        if pill_name:
+            inventory = player.get_pills_inventory()
+            if inventory.get(pill_name, 0) <= 0:
+                return False, f"❌ 背包中没有【{pill_name}】，无法用它辅助突破！", False
+            inventory[pill_name] -= 1
+            if inventory[pill_name] <= 0:
+                del inventory[pill_name]
+            player.set_pills_inventory(inventory)
+            await self.db.update_player(player)
+
         # 计算成功率
         success_rate, rate_info = self.calculate_breakthrough_success_rate(player, pill_name, temp_bonus)
 
