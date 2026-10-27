@@ -4,7 +4,7 @@
   <img src="logo.png" alt="模拟修仙" width="200">
 </p>
 
-> **版本:** v3.3.5  
+> **版本:** v3.3.6  
 > **许可证:** AGPL-3.0  
 > **作者:** xiaojuwa  
 > **基于:** [nonebot_plugin_xiuxian_2](https://github.com/xiuxian-2/nonebot_plugin_xiuxian_2) (部分借鉴与重构)
@@ -406,6 +406,19 @@ astrbot_plugin_monixiuxian2/
 - `managers/spirit_farm_manager.py` 新增 `plant_all(player, herb_name, count=None)`：把全部空种植格一次性种满指定灵草；省略 `count` 则填满所有空格，指定数量则只种 N 株。
 - `handlers/spirit_farm_handlers.py` 新增 `handle_plant_all`，兼容「灵草名 数量」同参写法。
 - `main.py` 新增指令 **`一键种植 <灵草名> [数量]`**（已登记修仙帮助与指令表）。
+
+---
+
+### v3.3.6 - 面板美化：所有长文本指令渲染为仙侠风格图片
+
+**✨ 升级：转图样式从「白底黑字」升级为「仙侠面板模板」**
+
+- **实现**：新增 `utils/panel_renderer.py`——把插件长文本按行解析（标题 / `【段落】` / `键：值` / `指令 → 说明` / `└─ 备注` / 分隔线）后套宣纸+金主题模板，经宿主 `html_render` 截图输出。**一处实现，全部指令的长面板自动美化**，无需改动任何 handler。
+- **视觉**：宣纸底色 + 金色段落标题 + 攻防数值红色高亮（`+364` / 百分比）+ 修仙帮助「指令 → 说明」对齐排版 + 警告行（⚠️ 逾期/致死）红色强调；面板数据原样保留，**解析宽容绝不丢行**。
+- **回退链**：模板渲染失败 → 宿主默认 `text_to_image` → 仍失败 → 纯文本，任何环境都不会发不出消息。
+- **兼容性**：输出 HTML 全部使用 class 选择器、无 Jinja2 语法冲突序列（`{{`/`{%`/`{#`）；所有文本经 HTML 转义。
+
+**验证**：新增 `test_panel_renderer.py` 29 项断言（三大真实面板关键字段零丢失、行类型、高亮、转义、Jinja 兼容、边界）；`test_image_mode.py` 扩展至 19 项（美化回退链）；`smoke_import` ALL OK。
 
 ---
 

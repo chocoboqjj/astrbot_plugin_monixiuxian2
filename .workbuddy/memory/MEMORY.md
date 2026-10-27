@@ -65,9 +65,12 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **⚠️ 面板精炼口径**：`get_total_attributes(..., refine_map, refine_per_star)` 武器/防具攻防 ×(1+star×per_star)、精神力/心法不放大、逐项 int(round)（round 银行家舍入）；排行/我的属性/我的装备均传 refine_map，不传参=旧行为。
 - **⚠️ 测试替身 `_DB` 须补 `get_refine_map`**（返回 `{}`），否则 spirit_eye/boss 测试 AttributeError；迁移断言用 `==26`。
 
-## 图片模式（v3.3.5）
-- `main.py` `on_decorating_result` 钩子 + `long_plain_text`：单条纯文本 ≥ `IMAGE_MODE_MIN_LENGTH`(300) 自动 `text_to_image(text, return_url=False)` 转图，失败/未配置 html-render 回退纯文本；富媒体/短文本不转。钩子内**禁 yield**，改 `event.get_result().chain`。
-- **⚠️ 组件判定用 type 名 `"Plain"`** ⇒ 测试 stub 类名必须叫 `Plain`/`Image`。官方 API 是 `self.text_to_image`/`event.image_result`，**无** `event.text_to_picture`。
+## 图片模式（v3.3.5/v3.3.6）
+- `main.py` `on_decorating_result` 钩子 + `long_plain_text`：单条纯文本 ≥ `IMAGE_MODE_MIN_LENGTH`(300) 自动转图，富媒体/短文本不转。钩子内**禁 yield**，改 `event.get_result().chain`。
+- **⚠️ 组件判定用 type 名 `"Plain"`** ⇒ 测试 stub 类名必须叫 `Plain`/`Image`。官方 API 是 `self.text_to_image`/`self.html_render`/`event.image_result`，**无** `event.text_to_picture`。
+- **v3.3.6 美化**：`utils/panel_renderer.py::render_panel_html` 按行宽容解析（标题/【段落】/kv/`→`指令/`└─`/分隔线/普通行，**绝不丢行**）→ 宣纸金模板 → 优先 `html_render(html,{},return_url=False)`，失败回退 `text_to_image`，再回退纯文本。**⚠️ html_render 用 Jinja2 渲染模板串** ⇒ CSS 全 class 选择器（勿用 id 防 `{#`）、模板禁 `{{`/`{%`；文本须 HTML 转义；无冒号的 `+数值` 行靠 `_emphasize` 高亮。
+
+## 工程约定
 
 ## 工程约定
 - 按 AGENTS.md：功能更新/BUG 修复需同步 README.md、metadata.yaml 版本号、misc_handler.py 修仙帮助；新增玩家可见指令需登记 README 指令表与帮助。

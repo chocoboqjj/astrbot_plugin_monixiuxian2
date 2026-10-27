@@ -6,6 +6,7 @@ from astrbot.api import logger, AstrBotConfig
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Image
+from .utils.panel_renderer import render_panel_html
 from .data import DataBase, MigrationManager
 from .config_manager import ConfigManager
 from .handlers import (
@@ -1503,8 +1504,8 @@ class XiuXianPlugin(Star):
         """出站装饰钩子：把超长纯文本回复渲染成图片，缓解刷屏阅读压力。
 
         - 开关：VALUES.IMAGE_MODE（默认开）；阈值：VALUES.IMAGE_MODE_MIN_LENGTH（默认 300 字）。
-        - 依赖宿主 AstrBot 已配置 html-render（Playwright）渲染器；
-          未配置或渲染失败时自动回退纯文本，行为与旧版一致。
+        - v3.3.6：优先用「仙侠面板模板」经 html_render 美化渲染；
+          模板/渲染失败时回退宿主默认 text_to_image；仍失败则保持纯文本。
         - 短回复（确认/拒绝等）与含 At/图片的消息链不转换。
         """
         try:
@@ -1523,7 +1524,18 @@ class XiuXianPlugin(Star):
             if text is None:
                 return
 
-            path = await self.text_to_image(text, return_url=False)
+            path = None
+            # ① 仙侠美化模板（v3.3.6）
+            panel_html = render_panel_html(text)
+            if panel_html:
+                try:
+                    path = await self.html_render(panel_html, {}, return_url=False)
+                except Exception as e:
+                    logger.warning(f"[面板美化] 模板渲染失败，回退默认文转图: {e}")
+                    path = None
+            # ② 宿主默认文转图
+            if not path:
+                path = await self.text_to_image(text, return_url=False)
             if not path:
                 return
             result.chain = [Image.fromFileSystem(path)]
