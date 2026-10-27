@@ -39,8 +39,8 @@ AstrBot 文字修仙（放置 RPG）插件，AGPL-3.0，作者 xiaojuwa。当前
 - **⚠️ 时限模型取「最慢可行路线」**：猎魔/九死一生按 ceil 折算轮数、须含秘境 `rift`、`bounty_progress` 减的是**轮数**。`format_completion_hint` 把 `progress_tags` 翻成指令（描述性标签不单列）；专属掉落 `item_tables` 与主线同步。
 
 ## 天地灵眼系统约定（v3.2.6）
-- **时效逐档减半**（24/12/6/3h）。到期自动消散，**先结算持有者未收修为再删，绝不吞收益**。`get_all_spirit_eyes()` 含被占，`get_available_spirit_eyes()` 只返无主。
-- **@人 争夺**：`/抢占灵眼 @对方` → 切磋式战斗（不扣气血），发起方/胜守方各 5 分钟冷却/守护期。**⚠️ 参数歧义**（编号或@目标）⇒ `extract_target_id(allow_bare_id=False, allow_text_number=False)`。**⚠️ 并发抢占**靠条件 UPDATE+rowcount（`WHERE eye_id=? AND (owner_id IS NULL OR owner_id='')`），先判 rowcount 再 commit。迁移常量写 `data/migration.py` 模块级（勿 import managers），测试断言对齐 `SPIRIT_EYE_TYPES`。
+- **时效逐档减半**（24/12/6/3h），到期自动消散，**先结算未收修为再删，绝不吞收益**；`get_all_spirit_eyes()` 含被占，`get_available_spirit_eyes()` 只返无主。
+- **@人 争夺**：`/抢占灵眼 @对方` → 切磋式战斗（不扣气血），发起方/胜守方各 5 分钟冷却/守护期。**⚠️ 参数歧义**（编号或@目标）⇒ `extract_target_id(allow_bare_id=False, allow_text_number=False)`；**⚠️ 并发抢占**条件 UPDATE+rowcount（`WHERE eye_id=? AND (owner_id IS NULL OR owner_id='')`），先判 rowcount 再 commit；迁移常量写 `data/migration.py` 模块级，断言对齐 `SPIRIT_EYE_TYPES`。
 
 ## 天灾人祸系统约定（v3.2.9）
 - **⚠️ 扣减必须「原地加减」**（`gold = MAX(0, gold - ?)`），**不能**读旧值写回绝对值：所有 manager **共享同一 aiosqlite 连接**，事务边界**连接级** ⇒ 写回绝对值**丢更新**；也不能「条件 UPDATE+旧值守卫+rollback」（rollback 连坐其他协程）。
