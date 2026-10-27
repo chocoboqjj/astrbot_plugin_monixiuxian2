@@ -421,8 +421,9 @@ astrbot_plugin_monixiuxian2/
   - **其余长文本** → 通用条目式排版。
 - **双主题**：`VALUES.PANEL_THEME` 可选 `paper`（**宣纸金，默认**——宣纸底 + 墨字 + 金标题，第一版设计）/ `gold`（玄金暗色 + 霓虹渐变）。两套主题共用同一套 DOM 与类名，仅 CSS 变量不同，切换零成本。
 - **修复预览无样式问题**：旧预览脚本只摘取 `<body>` 内容而丢弃面板自带 `<style>`，导致浏览器按裸文字渲染；现改为每个面板以 `iframe srcdoc` 独立渲染（与宿主 `html_render` 截图环境一致，CSS 天然隔离）。
+- **修复转图发糊 + 右侧空白色块**：宿主 t2i 服务的默认截图选项是 `{"type":"jpeg","quality":40,"full_page":True}`，视口默认 800px ⇒ ① JPEG 质量仅 40 文字发糊；② 面板 body 只有 490px 宽，右侧 310px 是空白色块。现通过 `html_render(..., options=...)` 显式指定 `type=png`（无损）、`viewport_width=490`（视口与面板等宽）、`device_scale_factor_level=ultra`（1.8x 像素比，文字锐利）；同时面板 HTML 内写入 `<meta name="viewport" content="width=490">` 作为老服务端的兜底（服务端视口优先级：显式参数 > meta > 默认 800px）。`full_page` 保持 True——面板高度不固定，截整页才能完整显示。
 
-**验证**：新增 `test_panel_renderer.py` 41 项断言（含双主题配色/DOM 一致性/默认主题/未知主题回退/Jinja 兼容）；`test_image_mode.py` 19 项；`smoke_import` ALL OK。
+**验证**：`test_panel_renderer.py` 51 项断言（含双主题配色/DOM 一致性/默认主题/未知主题回退/Jinja 兼容/分隔线渲染/`PANEL_WIDTH` 与 CSS 一致性）；`test_image_mode.py` 26 项（含渲染选项断言）；`smoke_import` ALL OK。另用 Playwright 复刻服务端 `html2pic` 逻辑做修复前后截图对比（800×760 模糊+色块 → 882×1368 高清无色块）。
 
 ---
 

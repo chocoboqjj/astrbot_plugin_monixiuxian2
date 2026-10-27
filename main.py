@@ -6,7 +6,7 @@ from astrbot.api import logger, AstrBotConfig
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.message_components import Image
-from .utils.panel_renderer import render_panel_html
+from .utils.panel_renderer import render_panel_html, PANEL_WIDTH
 from .data import DataBase, MigrationManager
 from .config_manager import ConfigManager
 from .handlers import (
@@ -198,6 +198,29 @@ def long_plain_text(chain, min_len: int):
         parts.append(getattr(comp, "text", "") or "")
     text = "".join(parts)
     return text if len(text) >= min_len else None
+
+
+def _render_options():
+    """v3.3.7：面板转图的渲染选项（传给宿主 t2i 服务的 Playwright 截图参数）。
+
+    宿主的默认选项是 ``{"type": "jpeg", "quality": 40, "full_page": True}``，
+    直接用会有两个肉眼可见的缺陷：
+    1. **图片发糊** —— JPEG 有损压缩且质量仅 40 ⇒ 改用 PNG（无损，服务端会自动忽略 quality）。
+    2. **右侧多一条空白色块** —— 服务端视口默认 800px，而面板 body 只有 490px 宽，
+       右边 310px 是空的 ``body`` 背景 ⇒ 显式指定 ``viewport_width`` 让视口与面板等宽。
+
+    ``full_page`` 保持 True：面板高度不固定，截整页才能完整显示（视口宽度仍按上面精确指定）。
+    ``device_scale_factor_level`` 提高设备像素比（high=1.3x / ultra=1.8x）⇒ 文字更锐利。
+
+    兼容性：这些键都是 Playwright 截图 API 的标准参数，服务端 Pydantic 模型会忽略
+    不认识的键 ⇒ 老版本服务也能正常工作（此时退化为默认效果，不会报错）。
+    """
+    return {
+        "type": "png",                       # 无损，文字锐利（替代 jpeg quality=40）
+        "full_page": True,                   # 面板高度不定，截整页
+        "viewport_width": PANEL_WIDTH,       # 视口 = 面板宽，消除右侧空白色块
+        "device_scale_factor_level": "ultra",  # 1.8x 像素比，细节更清晰
+    }
 
 
 class XiuXianPlugin(Star):
@@ -1527,11 +1550,12 @@ class XiuXianPlugin(Star):
                 return
 
             path = None
-            # ① 仙侠美化模板（v3.3.6，v3.3.7 支持双主题）
+            # ① 仙侠美化模板（v3.3.6，v3.3.7 支持双主题 + 高清渲染选项）
             panel_html = render_panel_html(text, theme)
             if panel_html:
                 try:
-                    path = await self.html_render(panel_html, {}, return_url=False)
+                    path = await self.html_render(panel_html, {}, return_url=False,
+                                                 options=_render_options())
                 except Exception as e:
                     logger.warning(f"[面板美化] 模板渲染失败，回退默认文转图: {e}")
                     path = None

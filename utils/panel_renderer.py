@@ -225,6 +225,10 @@ body{width:var(--w);background:var(--bg);
 THEMES = {"paper": _CSS_THEME_PAPER, "gold": _CSS_THEME_GOLD}
 DEFAULT_THEME = "paper"
 
+# 面板渲染宽度（CSS 中 body 的 width）。**必须与 _CSS 里的 --w 保持一致**——
+# 宿主 t2i 服务默认视口 800px，若不显式指定 viewport_width，body 右侧会留下一条空白色块。
+PANEL_WIDTH = 490
+
 
 
 def _esc(s: str) -> str:
@@ -247,7 +251,11 @@ def _div_html() -> str:
 
 def _frame(title_html: str, body: str, theme: str = DEFAULT_THEME) -> str:
     theme_css = THEMES.get(theme, THEMES[DEFAULT_THEME])
+    # ⚠️ meta viewport 是「消除右侧空白色块」的第二道保险：
+    # 宿主 t2i 服务的视口优先级为 ①options.viewport_width ②HTML meta viewport ③默认 800px。
+    # 显式传 options 时用①即可；此处再写 meta，兼容不认①的老服务端。
     return ('<!DOCTYPE html><html><head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width={PANEL_WIDTH}">'
             f"<style>{theme_css}{_CSS}</style></head>"
             '<body><div class="frame">'
             '<span class="corner c-tl"></span><span class="corner c-tr"></span>'
