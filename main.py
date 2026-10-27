@@ -33,6 +33,12 @@ def require_whitelist(func):
     """装饰器：检查群聊白名单权限"""
     @wraps(func)
     async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
+        # v3.3.9：标记「本插件产生的回复」，供 on_decorating_result 转图时仅作用于本插件，
+        # 不误伤其它插件 / LLM 回复（该钩子在流水线 ResultDecorateStage 全局触发）。
+        try:
+            event._xiuxian_owns = True
+        except Exception:
+            pass
         if not self._check_access(event):
             await self._send_access_denied_message(event)
             return
@@ -210,8 +216,8 @@ def long_plain_text(chain, min_len: int):
     return text if len(text) >= min_len else None
 
 
-def _render_options():
-    """v3.3.7：面板转图的渲染选项（传给宿主 t2i 服务的 Playwright 截图参数）。
+def _render_options(values: dict):
+    """v3.3.9：面板转图的渲染选项（传给宿主 t2i 服务的 Playwright 截图参数）。
 
     宿主的默认选项是 ``{"type": "jpeg", "quality": 40, "full_page": True}``，
     直接用会有两个肉眼可见的缺陷：
@@ -219,22 +225,33 @@ def _render_options():
     2. **右侧多一条空白色块** —— 服务端视口默认 800px，而面板 body 只有 490px 宽，
        右边 310px 是空的 ``body`` 背景 ⇒ 显式指定 ``viewport_width`` 让视口与面板等宽。
 
-    ``full_page`` 保持 True：面板高度不固定，截整页才能完整显示（视口宽度仍按上面精确指定）。
-    ``viewport_height`` 取极小值（10）：full_page 截图的高度是「内容高 vs 视口高」的较大者，
-    服务端默认视口高 720px ⇒ 内容不足 720px 的面板（如商店货架）底部会补一大片空白，
-    把视口高压到 10px 就能让 full_page 按内容实际高度裁剪（内容更高的面板不受影响）。
-    ``device_scale_factor_level`` 提高设备像素比（high=1.3x / ultra=1.8x）⇒ 文字更锐利。
+    **关于「full 模式」与留白（v3.3.9 可配）**：
+    面板高度不固定，正确做法是「整页截图 + 把视口高度压到极小」——
+    full_page 截图高度取「内容高 vs 视口高」的较大者，视口高压到 10px 后，
+    短面板就不会被补成默认 720px 视口高度的一片空白，超长面板也能完整截下。
+    这正是「消除大面积留白」的机制，而非根因；根因是此前未约束视口高度。
+    若你的渲染器对 full_page 支持异常（仍出现整页空白），可在配置里关掉
+    ``IMAGE_MODE_FULL_PAGE`` ⇒ 改用固定视口截图（给足高度避免截断常见面板）。
+    ``device_scale_factor_level`` 提高设备像素比（high=1.3x）⇒ 文字更锐利。
 
     兼容性：这些键都是 Playwright 截图 API 的标准参数，服务端 Pydantic 模型会忽略
     不认识的键 ⇒ 老版本服务也能正常工作（此时退化为默认效果，不会报错）。
     """
-    return {
+    full_page = bool(values.get("IMAGE_MODE_FULL_PAGE", True))
+    opts = {
         "type": "png",                       # 无损，文字锐利（替代 jpeg quality=40）
-        "full_page": True,                   # 面板高度不定，截整页
         "viewport_width": PANEL_WIDTH,       # 视口 = 面板宽，消除右侧空白色块
-        "viewport_height": 10,               # 视口高度取极小值 ⇒ full_page 按内容实际高度裁剪
-        "device_scale_factor_level": "ultra",  # 1.8x 像素比，细节更清晰
+        "device_scale_factor_level": "high",  # 1.3x 像素比，细节更清晰
     }
+    if full_page:
+        # 整页截图：按面板实际内容高度裁剪——短内容不补空白、超长面板不截断。
+        opts["full_page"] = True
+        opts["viewport_height"] = 10         # 视口高度取极小值 ⇒ full_page 按内容实际高度裁剪
+    else:
+        # 固定视口截图（规避个别渲染器的整页空白）；给足高度避免截断常见面板。
+        opts["full_page"] = False
+        opts["viewport_height"] = 3000
+    return opts
 
 
 class XiuXianPlugin(Star):
@@ -1576,9 +1593,16 @@ class XiuXianPlugin(Star):
         - v3.3.6：优先用「仙侠面板模板」经 html_render 美化渲染；
           模板/渲染失败时回退宿主默认 text_to_image；仍失败则保持纯文本。
         - v3.3.7：主题 VALUES.PANEL_THEME（paper=宣纸金默认 / gold=玄金暗色）。
+        - v3.3.9：**仅作用于本插件自己产生的回复**（event._xiuxian_owns 由指令入口标记）。
+          该钩子在流水线 ResultDecorateStage 全局触发，若不拦截会误把其它插件的长文本 /
+          LLM 回复也转成图片。
         - 短回复（确认/拒绝等）与含 At/图片的消息链不转换。
         """
         try:
+            # v3.3.9：仅本插件来源。on_decorating_result 全局触发，必须先排除其它来源，
+            # 否则会误伤其它插件与 LLM 回复。
+            if not getattr(event, "_xiuxian_owns", False):
+                return
             values = self.config.get("VALUES", {}) or {}
             if not values.get("IMAGE_MODE", True):
                 return
@@ -1596,12 +1620,12 @@ class XiuXianPlugin(Star):
                 return
 
             path = None
-            # ① 仙侠美化模板（v3.3.6，v3.3.7 支持双主题 + 高清渲染选项）
+            # ① 仙侠美化模板（v3.3.6，v3.3.7 支持双主题 + 高清渲染选项；v3.3.9 支持 full_page 开关）
             panel_html = render_panel_html(text, theme)
             if panel_html:
                 try:
                     path = await self.html_render(panel_html, {}, return_url=False,
-                                                 options=_render_options())
+                                                 options=_render_options(values))
                 except Exception as e:
                     logger.warning(f"[面板美化] 模板渲染失败，回退默认文转图: {e}")
                     path = None

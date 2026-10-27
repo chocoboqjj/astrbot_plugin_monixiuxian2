@@ -368,6 +368,7 @@
 | `CALAMITY`（v3.2.9 新增） | `ENABLED`、`INTERVAL`、`NO_EVENT_CHANCE`、`RATE_JITTER`、`SHIELD_CONSUMED_ON_BLOCK` | 天灾人祸；`INTERVAL` = 触发间隔秒数（默认 3600），`NO_EVENT_CHANCE` = 虚惊一场概率（默认 30%），`RATE_JITTER` = 扣减比例抖动幅度（默认 0.2 即 ±20%） |
 | `VALUES` 图片模式（v3.3.5 新增） | `IMAGE_MODE`、`IMAGE_MODE_MIN_LENGTH` | 长文本回复自动渲染为图片；`IMAGE_MODE` 默认开，`IMAGE_MODE_MIN_LENGTH` = 转图字数阈值（默认 300）。**需要宿主已配置 html-render（Playwright）渲染器**，未配置或渲染失败自动回退纯文本；短回复与含 @/图片的消息不受影响 |
 | `VALUES` 面板主题（v3.3.7 新增） | `PANEL_THEME` | 转图面板的视觉主题；`paper` = 宣纸金（默认，第一版设计）、`gold` = 玄金暗色。未知值回退默认主题 |
+| `VALUES` 转图整页截图（v3.3.9 新增） | `IMAGE_MODE_FULL_PAGE` | 默认 `true`：整页截图并按面板实际高度裁剪（短内容无大片空白、超长面板不截断）。若你的渲染器对整页截图支持异常（仍出现整页空白），可改为 `false` 改用固定视口截图（超长面板可能被截断） |
 
 **注意**：修改配置后需重启 AstrBot 生效。
 
@@ -440,6 +441,18 @@ astrbot_plugin_monixiuxian2/
 ---
 
 ## 📝 更新日志
+
+### v3.3.9 - 图片模式：仅限本插件 + 整页截图防留白
+
+**🐛 修复：转图逻辑误伤其它插件**
+
+- **根因**：`main.py` 的 `on_decorating_result` 出站装饰钩子在 AstrBot 流水线的 `ResultDecorateStage` **全局触发**——它会对所有经过管线的出站消息生效，包括其它插件的长文本回复与 LLM / Agent 回复，导致这些回复被本插件误转成图片。
+- **修复**：在指令入口装饰器 `require_whitelist`（包裹 `main.py` 全部 `@filter.command` 入口）与 `player_required`（包裹各 handler 方法）里，给 event 打上「本插件来源」标记 `_xiuxian_owns`；`convert_long_text_to_image` 钩子仅对带此标记的回复生效，其它来源一律跳过。
+
+**🐛 修复：短文本被渲染成大面积留白的大图**
+
+- **根因**：此前未约束渲染视口高度，渲染器用默认视口（如 720px）整页截图，内容不足视口的短面板被补成一大片空白。
+- **修复**：整页截图时把视口高度压到极小值（10px），Playwright 会按面板**实际内容高度**裁剪，短内容不再补空白、超长面板也不会被截断；新增配置 `IMAGE_MODE_FULL_PAGE`（默认 `true`，改为 `false` 则改用固定视口截图，适用于个别对整页截图支持异常的渲染器）。
 
 ### v3.3.8 - 道具回收/服用/赠送修复 + 炼丹炼器体系扩充 + 功法合成与投毒 + 高阶秘境历练
 

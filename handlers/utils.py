@@ -369,6 +369,13 @@ def player_required(func: Callable[..., Coroutine[any, any, AsyncGenerator[any, 
     """
     @wraps(func)
     async def wrapper(self, event: AstrMessageEvent, *args, **kwargs):
+        # v3.3.9：标记「本插件产生的回复」，供 on_decorating_result 转图时仅作用于本插件。
+        # （本装饰器包裹的 handler 方法多由带 @require_whitelist 的指令入口调用，
+        #   此处再打一次标记是兜底，确保任何经由本插件 handler 产出的回复都能被转图作用域识别。）
+        try:
+            event._xiuxian_owns = True
+        except Exception:
+            pass
         # self 是 Handler 类的实例 (e.g., PlayerHandler)
         player = await self.db.get_player_by_id(event.get_sender_id())
 
